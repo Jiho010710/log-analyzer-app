@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from transformers import pipeline
+import torch  # 추가: dtype 사용 위해
 from elasticsearch import Elasticsearch
 from sklearn.ensemble import IsolationForest
 from reportlab.lib.pagesizes import letter
@@ -18,10 +19,10 @@ import xmltodict
 
 warnings.filterwarnings("ignore")
 
-# LLM 요약기
+# LLM 요약기 (dtype=torch.float32로 수정)
 @st.cache_resource
 def load_summarizer():
-    return pipeline("summarization", model="eenzeenee/t5-small-korean-summarization", device="cpu", truncation=True, dtype="float32")
+    return pipeline("summarization", model="eenzeenee/t5-small-korean-summarization", device="cpu", truncation=True, dtype=torch.float32)
 
 summarizer = load_summarizer()
 
@@ -114,15 +115,15 @@ sbom_target = st.text_input("SBOM 대상 (e.g., ubuntu:latest)", "ubuntu:latest"
 if st.button("SBOM 스캔"):
     with st.spinner("Trivy 스캔 중..."):
         try:
+            # Trivy 바이너리 호출 (호스팅 시 ./trivy로 변경)
             sbom_output = subprocess.run(["trivy", "image", "--format", "json", sbom_target], capture_output=True, text=True)
             vulns = json.loads(sbom_output.stdout)
             vulns_str = json.dumps(vulns.get('Results', [{}])[0].get('Vulnerabilities', 'No vulnerabilities found'), ensure_ascii=False)
             st.json(vulns)
-            # df에 추가 (임시, 실제로는 로그와 매핑)
             if 'df' in locals():
                 df['vulns'] = vulns_str
         except Exception as e:
-            st.error(f"Trivy 에러: {e}")
+            st.error(f"Trivy 에러: {e}. Trivy 설치 확인하세요.")
 
 # 5. LLM 요약 & PDF
 if 'df' in locals() and st.button("LLM 요약 & PDF 생성"):
@@ -143,7 +144,7 @@ if 'df' in locals() and st.button("LLM 요약 & PDF 생성"):
 
     # PDF 생성
     pdf_buffer = io.BytesIO()
-    font_path = 'gulim.ttc'  # 폴더에 업로드
+    font_path = './gulim.ttc'  # repo에 업로드된 폰트 사용
     pdfmetrics.registerFont(TTFont('Gulim', font_path))
 
     doc = SimpleDocTemplate(pdf_buffer, pagesize=letter)
