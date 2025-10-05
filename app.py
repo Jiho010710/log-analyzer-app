@@ -36,10 +36,14 @@ with st.sidebar.form(key="es_config_form"):
 
 if submit_es:
     es = Elasticsearch(hosts=[es_host], basic_auth=(es_user, es_pass), request_timeout=120)  # 타임아웃 증가
+    st.session_state.es = es  # 세션에 ES 연결 저장
     st.sidebar.success("ES 연결 완료!")
-else:
+
+# ES 연결 확인 (세션에서 불러옴)
+if 'es' not in st.session_state:
     st.sidebar.info("ES 설정을 입력하고 연결하세요.")
-    st.stop()  # ES 연결 전까지 앱 중지
+    st.stop()
+es = st.session_state.es
 
 # 앱 타이틀
 st.title("로그 분석 파이프라인 웹 앱 (POC)")
@@ -75,7 +79,7 @@ if st.button("로그 가져오기"):
 
 # 3. ML 필터
 if 'df' in st.session_state and st.button("ML 필터링"):
-    df = st.session_state.df.copy()  # 복사 사용
+    df = st.session_state.df.copy()  # 세션에서 복사
     try:
         # GrantedAccess 변환
         def hex_to_int(value):
