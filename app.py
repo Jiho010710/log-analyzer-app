@@ -72,10 +72,14 @@ if st.button("로그 가져오기"):
         res = es.search(index=".internal.alerts-security.alerts*", body=query)
         logs = [hit['_source'] for hit in res['hits']['hits']]
         st.session_state.df = pd.DataFrame(logs)  # 세션에 저장
-        # 간단 출력: new_level, message, 사용자, ml_score (ml_score 초기화)
-        st.session_state.df['ml_score'] = 0.0  # 초기화
-        simplified_df = st.session_state.df[['new_level', 'message', 'winlog.user.name', 'ml_score']] if 'winlog.user.name' in st.session_state.df.columns else st.session_state.df[['new_level', 'message', 'ml_score']]
-        simplified_df['winlog.user.name'] = simplified_df.get('winlog.user.name', 'N/A')  # 사용자 없으면 N/A
+        # 간단 출력: 필요한 컬럼만 (new_level 없으면 생략)
+        columns_to_show = []
+        if 'new_level' in st.session_state.df.columns: columns_to_show.append('new_level')
+        if 'message' in st.session_state.df.columns: columns_to_show.append('message')
+        if 'winlog.user.name' in st.session_state.df.columns: columns_to_show.append('winlog.user.name')
+        if 'ml_score' in st.session_state.df.columns: columns_to_show.append('ml_score')
+        simplified_df = st.session_state.df[columns_to_show] if columns_to_show else st.session_state.df.head()
+        simplified_df['winlog.user.name'] = simplified_df.get('winlog.user.name', 'N/A')
         st.success(f"총 {len(st.session_state.df)}개 로그 가져옴")
         st.dataframe(simplified_df)  # 간단 테이블 표시
     except Exception as e:
