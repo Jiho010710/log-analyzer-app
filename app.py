@@ -60,14 +60,15 @@ if st.button("로그 가져오기"):
     try:
         res = es.search(index=".internal.alerts-security.alerts*", body=query)
         logs = [hit['_source'] for hit in res['hits']['hits']]
-        df = pd.DataFrame(logs)
-        st.success(f"총 {len(df)}개 로그 가져옴")
-        st.dataframe(df.head())
+        st.session_state.df = pd.DataFrame(logs)  # 세션에 저장
+        st.success(f"총 {len(st.session_state.df)}개 로그 가져옴")
+        st.dataframe(st.session_state.df.head())
     except Exception as e:
         st.error(f"ES 쿼리 에러: {e}")
 
-# 3. ML 필터 (에러 핸들링 추가)
-if 'df' in locals() and st.button("ML 필터링"):
+# 3. ML 필터
+if 'df' in st.session_state and st.button("ML 필터링"):
+    df = st.session_state.df.copy()  # 세션에서 불러와 복사 (수정 방지)
     try:
         # GrantedAccess 변환
         def hex_to_int(value):
@@ -107,6 +108,7 @@ if 'df' in locals() and st.button("ML 필터링"):
             else:
                 return 'low'
         df['new_level'] = df.apply(remap_level, axis=1)
+        st.session_state.df = df  # 수정된 df 세션에 업데이트
         st.success("ML 필터 완료!")
         st.dataframe(df)
         df.to_csv('ml_filtered_logs.csv', index=False, encoding='utf-8-sig')
@@ -123,13 +125,16 @@ if st.button("SBOM 스캔"):
             vulns = json.loads(sbom_output.stdout)
             vulns_str = json.dumps(vulns.get('Results', [{}])[0].get('Vulnerabilities', 'No vulnerabilities found'), ensure_ascii=False)
             st.json(vulns)
-            if 'df' in locals():
+            if 'df' in st.session_state:
+                df = st.session_state.df
                 df['vulns'] = vulns_str
+                st.session_state.df = df  # 업데이트 저장
         except Exception as e:
             st.error(f"Trivy 에러: {e}. Trivy 설치 확인하세요.")
 
 # 5. LLM 요약 & PDF
-if 'df' in locals() and st.button("LLM 요약 & PDF 생성"):
+if 'df' in st.session_state and st.button("LLM 요약 & PDF 생성"):
+    df = st.session_state.df.copy()  # 복사 사용
     with st.spinner("요약 중..."):
         for index, row in df.iterrows():
             level = row['new_level']
@@ -142,6 +147,7 @@ if 'df' in locals() and st.button("LLM 요약 & PDF 생성"):
             summary = summarizer(prompt, max_length=effective_max, min_length=50, do_sample=False, max_new_tokens=None)[0]['summary_text']
             df.at[index, 'summary'] = summary
 
+    st.session_state.df = df  # 업데이트 저장
     st.success("요약 완료!")
     st.dataframe(df)
 
