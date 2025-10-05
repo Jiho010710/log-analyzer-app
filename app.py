@@ -26,11 +26,15 @@ def load_summarizer():
 
 summarizer = load_summarizer()
 
-# ES 연결 (사용자 입력 호스트/인증)
+# ES 연결 (호스트/사용자 입력, 비밀번호는 secrets 사용)
 st.sidebar.title("ES 설정")
 es_host = st.sidebar.text_input("ES 호스트", "http://3.38.65.230:9200")
 es_user = st.sidebar.text_input("ES 사용자", "elastic")
-es_pass = st.sidebar.password_input("ES 비밀번호")  # 기본값 제거
+es_pass = st.secrets.get("ES_PASSWORD", "")  # Streamlit secrets에서 불러옴 (설정 안 하면 빈 문자열)
+
+if not es_pass:
+    st.sidebar.error("ES_PASSWORD secrets를 설정하세요. 앱 설정 > Secrets에서 추가.")
+    st.stop()
 
 es = Elasticsearch(hosts=[es_host], basic_auth=(es_user, es_pass), request_timeout=30)
 
