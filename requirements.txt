@@ -1,0 +1,8 @@
+streamlit
+transformers
+reportlab
+pandas
+elasticsearch
+scikit-learn
+evtx
+xmltodict
