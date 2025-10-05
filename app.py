@@ -75,7 +75,7 @@ if st.button("로그 가져오기"):
 
 # 3. ML 필터
 if 'df' in st.session_state and st.button("ML 필터링"):
-    df = st.session_state.df.copy()  # 세션에서 복사
+    df = st.session_state.df.copy()  # 복사 사용
     try:
         # GrantedAccess 변환
         def hex_to_int(value):
