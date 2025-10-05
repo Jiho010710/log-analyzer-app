@@ -26,17 +26,13 @@ def load_summarizer():
 
 summarizer = load_summarizer()
 
-# ES 연결 (호스트/사용자 입력, 비밀번호는 secrets 사용)
+# ES 연결 (사용자 입력 호스트/인증)
 st.sidebar.title("ES 설정")
 es_host = st.sidebar.text_input("ES 호스트", "http://3.38.65.230:9200")
 es_user = st.sidebar.text_input("ES 사용자", "elastic")
-es_pass = st.secrets.get("ES_PASSWORD", "")  # Streamlit secrets에서 불러옴 (설정 안 하면 빈 문자열)
+es_pass = st.sidebar.password_input("ES 비밀번호")  # 기본값 제거
 
-if not es_pass:
-    st.sidebar.error("ES_PASSWORD secrets를 설정하세요. 앱 설정 > Secrets에서 추가.")
-    st.stop()
-
-es = Elasticsearch(hosts=[es_host], basic_auth=(es_user, es_pass), request_timeout=30)
+es = Elasticsearch(hosts=[es_host], basic_auth=(es_user, es_pass), request_timeout=120)  # 타임아웃 증가
 
 # 앱 타이틀
 st.title("로그 분석 파이프라인 웹 앱 (POC)")
@@ -70,26 +66,27 @@ if st.button("로그 가져오기"):
     except Exception as e:
         st.error(f"ES 쿼리 에러: {e}")
 
-# 3. ML 필터
+# 3. ML 필터 (에러 핸들링 추가)
 if 'df' in locals() and st.button("ML 필터링"):
-    # GrantedAccess 변환
-    def hex_to_int(value):
-        if pd.isna(value) or str(value).strip() in ['-', '']:
-            return 0
-        try:
-            value_str = str(value).strip()
-            return int(value_str, 16) if value_str.startswith('0x') else int(value_str)
-        except ValueError:
-            return 0
+    try:
+        # GrantedAccess 변환
+        def hex_to_int(value):
+            if pd.isna(value) or str(value).strip() in ['-', '']:
+                return 0
+            try:
+                value_str = str(value).strip()
+                return int(value_str, 16) if value_str.startswith('0x') else int(value_str)
+            except ValueError:
+                return 0
 
-    features = []
-    if 'winlog.event_id' in df.columns: features.append('winlog.event_id')
-    if 'winlog.event_data.GrantedAccess' in df.columns: features.append('winlog.event_data.GrantedAccess')
-    if 'kibana.alert.risk_score' in df.columns: features.append('kibana.alert.risk_score')
+        features = []
+        if 'winlog.event_id' in df.columns: features.append('winlog.event_id')
+        if 'winlog.event_data.GrantedAccess' in df.columns: features.append('winlog.event_data.GrantedAccess')
+        if 'kibana.alert.risk_score' in df.columns: features.append('kibana.alert.risk_score')
 
-    if not features:
-        st.error("숫자 피처 없음")
-    else:
+        if not features:
+            raise ValueError("숫자 피처 없음 – 데이터 컬럼 확인하세요 (winlog.event_id 등).")
+
         for col in features:
             if col == 'winlog.event_data.GrantedAccess':
                 df[col] = df[col].apply(hex_to_int)
@@ -113,6 +110,8 @@ if 'df' in locals() and st.button("ML 필터링"):
         st.success("ML 필터 완료!")
         st.dataframe(df)
         df.to_csv('ml_filtered_logs.csv', index=False, encoding='utf-8-sig')
+    except Exception as e:
+        st.error(f"ML 필터링 에러: {e}. 데이터 컬럼 확인하거나 쿼리 범위 좁혀보세요.")
 
 # 4. SBOM 취약점 스캔
 st.subheader("SBOM 취약점 스캔")
