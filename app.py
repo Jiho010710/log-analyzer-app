@@ -26,13 +26,20 @@ def load_summarizer():
 
 summarizer = load_summarizer()
 
-# ES 연결 (사용자 입력 호스트/인증)
-st.sidebar.title("ES 설정")
-es_host = st.sidebar.text_input("ES 호스트", "http://3.38.65.230:9200")
-es_user = st.sidebar.text_input("ES 사용자", "elastic")
-es_pass = st.sidebar.password_input("ES 비밀번호")  # 기본값 제거
+# ES 연결 (사용자 입력 호스트/인증, form으로 감싸서 오류 방지)
+with st.sidebar.form(key="es_config_form"):
+    st.title("ES 설정")
+    es_host = st.text_input("ES 호스트", "http://3.38.65.230:9200")
+    es_user = st.text_input("ES 사용자", "elastic")
+    es_pass = st.text_input("ES 비밀번호", type="password")  # 기본값 제거, type=password
+    submit_es = st.form_submit_button("ES 연결")
 
-es = Elasticsearch(hosts=[es_host], basic_auth=(es_user, es_pass), request_timeout=120)  # 타임아웃 증가
+if submit_es:
+    es = Elasticsearch(hosts=[es_host], basic_auth=(es_user, es_pass), request_timeout=120)  # 타임아웃 증가
+    st.sidebar.success("ES 연결 완료!")
+else:
+    st.sidebar.info("ES 설정을 입력하고 연결하세요.")
+    st.stop()  # ES 연결 전까지 앱 중지
 
 # 앱 타이틀
 st.title("로그 분석 파이프라인 웹 앱 (POC)")
@@ -68,7 +75,7 @@ if st.button("로그 가져오기"):
 
 # 3. ML 필터
 if 'df' in st.session_state and st.button("ML 필터링"):
-    df = st.session_state.df.copy()  # 세션에서 불러와 복사 (수정 방지)
+    df = st.session_state.df.copy()  # 세션에서 복사
     try:
         # GrantedAccess 변환
         def hex_to_int(value):
@@ -108,7 +115,7 @@ if 'df' in st.session_state and st.button("ML 필터링"):
             else:
                 return 'low'
         df['new_level'] = df.apply(remap_level, axis=1)
-        st.session_state.df = df  # 수정된 df 세션에 업데이트
+        st.session_state.df = df  # 업데이트 저장
         st.success("ML 필터 완료!")
         st.dataframe(df)
         df.to_csv('ml_filtered_logs.csv', index=False, encoding='utf-8-sig')
