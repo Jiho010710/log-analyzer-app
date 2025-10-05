@@ -121,7 +121,10 @@ if 'df' in st.session_state and st.button("ML 필터링"):
         df['new_level'] = df.apply(remap_level, axis=1)
         st.session_state.df = df  # 업데이트 저장
         st.success("ML 필터 완료!")
-        st.dataframe(df)
+
+        # 간단 출력: 룰 이름(level), 탐지 내역(message), 사용자(user.name 가정), ML Score
+        simplified_df = df[['new_level', 'message', 'winlog.user.name', 'ml_score']] if 'winlog.user.name' in df.columns else df[['new_level', 'message', 'ml_score']]  # 사용자 컬럼 가정
+        st.dataframe(simplified_df)
         df.to_csv('ml_filtered_logs.csv', index=False, encoding='utf-8-sig')
     except Exception as e:
         st.error(f"ML 필터링 에러: {e}. 데이터 컬럼 확인하거나 쿼리 범위 좁혀보세요.")
@@ -141,7 +144,7 @@ if st.button("SBOM 스캔"):
                 df['vulns'] = vulns_str
                 st.session_state.df = df  # 업데이트 저장
         except Exception as e:
-            st.error(f"Trivy 에러: {e}. Trivy 설치 확인하세요.")
+            st.error(f"Trivy 에러: {e}. Trivy 설치 확인하세요. (sbom_target에 Docker 이미지 이름이나 파일 경로 넣으세요, e.g., ubuntu:latest 또는 ./myapp)")
 
 # 5. LLM 요약 & PDF
 if 'df' in st.session_state and st.button("LLM 요약 & PDF 생성"):
