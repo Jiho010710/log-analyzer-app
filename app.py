@@ -30,7 +30,8 @@ summarizer = load_summarizer()
 st.sidebar.title("ES 설정")
 es_host = st.sidebar.text_input("ES 호스트", "http://3.38.65.230:9200")
 es_user = st.sidebar.text_input("ES 사용자", "elastic")
-es_pass = st.sidebar.password_input("ES 비밀번호", "co575b_kFiSlxDQY2Wi4")
+es_pass = st.sidebar.password_input("ES 비밀번호")  # 기본값 제거
+
 es = Elasticsearch(hosts=[es_host], basic_auth=(es_user, es_pass), request_timeout=30)
 
 # 앱 타이틀
@@ -115,7 +116,6 @@ sbom_target = st.text_input("SBOM 대상 (e.g., ubuntu:latest)", "ubuntu:latest"
 if st.button("SBOM 스캔"):
     with st.spinner("Trivy 스캔 중..."):
         try:
-            # Trivy 바이너리 호출 (호스팅 시 ./trivy로 변경)
             sbom_output = subprocess.run(["trivy", "image", "--format", "json", sbom_target], capture_output=True, text=True)
             vulns = json.loads(sbom_output.stdout)
             vulns_str = json.dumps(vulns.get('Results', [{}])[0].get('Vulnerabilities', 'No vulnerabilities found'), ensure_ascii=False)
