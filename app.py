@@ -3,7 +3,6 @@ import pandas as pd
 from transformers import pipeline
 import torch  # 추가: dtype 사용 위해
 from elasticsearch import Elasticsearch
-from elasticsearch.helpers import scan  # Scroll API 위해 추가
 from sklearn.ensemble import IsolationForest
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
@@ -60,40 +59,27 @@ if evtx_file and st.button("ES에 인덱싱"):
             es.index(index=".internal.alerts-security.alerts*", body=event)
     st.success("인덱싱 완료!")
 
-# 2. Custom Rule 필터링 (ES 쿼리, 전체 가져오기 옵션 추가)
+# 2. Custom Rule 필터링 (ES 쿼리)
 st.subheader("Custom Rule 필터링")
 query_days = st.number_input("시간 범위 (일)", value=90)
-query_size = st.number_input("제한 로그 수 (0으로 하면 전체)", value=100, min_value=0)
-
+query_size = st.number_input("가져올 로그 수", value=100, max_value=10000)
 if st.button("로그 가져오기"):
     query = {
         "query": {"bool": {"filter": [{"range": {"@timestamp": {"gte": f"now-{query_days}d"}}}]}},
-        "size": query_size if query_size > 0 else 10000  # 기본 제한
+        "size": query_size
     }
     try:
-        if query_size == 0:  # 전체 가져오기 (Scroll API 사용)
-            logs = [doc['_source'] for doc in scan(es, index=".internal.alerts-security.alerts*", query=query["query"], scroll='1m')]
-        else:
-            res = es.search(index=".internal.alerts-security.alerts*", body=query)
-            logs = [hit['_source'] for hit in res['hits']['hits']]
+        res = es.search(index=".internal.alerts-security.alerts*", body=query)
+        logs = [hit['_source'] for hit in res['hits']['hits']]
         st.session_state.df = pd.DataFrame(logs)  # 세션에 저장
+        # 간단 출력: new_level, message, 사용자, ml_score (ml_score 초기화)
+        st.session_state.df['ml_score'] = 0.0  # 초기화
+        simplified_df = st.session_state.df[['new_level', 'message', 'winlog.user.name', 'ml_score']] if 'winlog.user.name' in st.session_state.df.columns else st.session_state.df[['new_level', 'message', 'ml_score']]
+        simplified_df['winlog.user.name'] = simplified_df.get('winlog.user.name', 'N/A')  # 사용자 없으면 N/A
         st.success(f"총 {len(st.session_state.df)}개 로그 가져옴")
-        st.dataframe(st.session_state.df.head())
+        st.dataframe(simplified_df)  # 간단 테이블 표시
     except Exception as e:
         st.error(f"ES 쿼리 에러: {e}")
-
-# 데이터 필터링 (전체 가져온 후 사용자 선택)
-if 'df' in st.session_state:
-    st.subheader("로그 필터링 & 보기")
-    level_filter = st.multiselect("레벨 필터", options=['low', 'medium', 'high'], default=['low', 'medium', 'high'])
-    keyword_filter = st.text_input("키워드 검색 (message 컬럼)")
-    
-    df = st.session_state.df
-    if level_filter:
-        df = df[df['new_level'].isin(level_filter)] if 'new_level' in df.columns else df
-    if keyword_filter:
-        df = df[df['message'].str.contains(keyword_filter, case=False, na=False)] if 'message' in df.columns else df
-    st.dataframe(df)
 
 # 3. ML 필터
 if 'df' in st.session_state and st.button("ML 필터링"):
@@ -139,7 +125,11 @@ if 'df' in st.session_state and st.button("ML 필터링"):
         df['new_level'] = df.apply(remap_level, axis=1)
         st.session_state.df = df  # 업데이트 저장
         st.success("ML 필터 완료!")
-        st.dataframe(df)
+        
+        # 간단 출력: new_level, message, 사용자, ml_score (쓸데없는 컬럼 제거)
+        simplified_df = df[['new_level', 'message', 'winlog.user.name', 'ml_score']] if 'winlog.user.name' in df.columns else df[['new_level', 'message', 'ml_score']]
+        simplified_df['winlog.user.name'] = simplified_df.get('winlog.user.name', 'N/A')  # 사용자 없으면 N/A
+        st.dataframe(simplified_df)  # 간단 테이블 표시
         df.to_csv('ml_filtered_logs.csv', index=False, encoding='utf-8-sig')
     except Exception as e:
         st.error(f"ML 필터링 에러: {e}. 데이터 컬럼 확인하거나 쿼리 범위 좁혀보세요.")
@@ -178,7 +168,11 @@ if 'df' in st.session_state and st.button("LLM 요약 & PDF 생성"):
 
     st.session_state.df = df  # 업데이트 저장
     st.success("요약 완료!")
-    st.dataframe(df)
+    
+    # 간단 출력: new_level, message, 사용자, ml_score, summary
+    simplified_df = df[['new_level', 'message', 'winlog.user.name', 'ml_score', 'summary']] if 'winlog.user.name' in df.columns else df[['new_level', 'message', 'ml_score', 'summary']]
+    simplified_df['winlog.user.name'] = simplified_df.get('winlog.user.name', 'N/A')  # 사용자 없으면 N/A
+    st.dataframe(simplified_df)  # 간단 테이블 표시
 
     # PDF 생성
     pdf_buffer = io.BytesIO()
