@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 from openai import OpenAI  # GPT 사용
-from vt import Client as VTClient  # VirusTotal 사용
 from elasticsearch import Elasticsearch
 from sklearn.ensemble import IsolationForest
 from reportlab.lib.pagesizes import letter
@@ -21,9 +20,6 @@ warnings.filterwarnings("ignore")
 
 # GPT 설정 (API 키 secrets 사용)
 openai_client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-
-# VirusTotal 설정 (API 키 secrets 사용)
-vt_client = VTClient(st.secrets["VIRUSTOTAL_API_KEY"])
 
 # ES 연결 (사용자 입력 호스트/인증, form으로 감싸서 오류 방지)
 with st.sidebar.form(key="es_config_form"):
@@ -91,45 +87,33 @@ if 'df' in st.session_state:
     with col1:
         if st.button("LOW"):
             df = st.session_state.df
-            level_col = 'new_level' if 'new_level' in df.columns else 'kibana.alert.severity' if 'kibana.alert.severity' in df.columns else None
-            if level_col:
-                filtered_df = df[df[level_col].str.lower() == 'low']
-                if '@timestamp' in filtered_df.columns:
-                    filtered_df = filtered_df.sort_values('@timestamp', ascending=False)  # 최근 순
-                st.session_state.filtered_df = filtered_df
-                simplified_df = filtered_df[['new_level', 'message', 'winlog.user.name', 'ml_score']] if 'winlog.user.name' in filtered_df.columns else filtered_df[['new_level', 'message', 'ml_score']]
-                simplified_df['winlog.user.name'] = simplified_df.get('winlog.user.name', 'N/A') # 사용자 없으면 N/A
-                st.dataframe(simplified_df) # 간단 테이블 표시
-            else:
-                st.error("레벨 컬럼 없음 (new_level or kibana.alert.severity 확인)")
+            filtered_df = df[df['new_level'] == 'low'] if 'new_level' in df.columns else df
+            if '@timestamp' in filtered_df.columns:
+                filtered_df = filtered_df.sort_values('@timestamp', ascending=False)  # 최근 순
+            st.session_state.filtered_df = filtered_df
+            simplified_df = filtered_df[['new_level', 'message', 'winlog.user.name', 'ml_score']] if 'winlog.user.name' in filtered_df.columns else filtered_df[['new_level', 'message', 'ml_score']]
+            simplified_df['winlog.user.name'] = simplified_df.get('winlog.user.name', 'N/A') # 사용자 없으면 N/A
+            st.dataframe(simplified_df) # 간단 테이블 표시
     with col2:
         if st.button("MEDIUM"):
             df = st.session_state.df
-            level_col = 'new_level' if 'new_level' in df.columns else 'kibana.alert.severity' if 'kibana.alert.severity' in df.columns else None
-            if level_col:
-                filtered_df = df[df[level_col].str.lower() == 'medium']
-                if '@timestamp' in filtered_df.columns:
-                    filtered_df = filtered_df.sort_values('@timestamp', ascending=False)  # 최근 순
-                st.session_state.filtered_df = filtered_df
-                simplified_df = filtered_df[['new_level', 'message', 'winlog.user.name', 'ml_score']] if 'winlog.user.name' in filtered_df.columns else filtered_df[['new_level', 'message', 'ml_score']]
-                simplified_df['winlog.user.name'] = simplified_df.get('winlog.user.name', 'N/A') # 사용자 없으면 N/A
-                st.dataframe(simplified_df) # 간단 테이블 표시
-            else:
-                st.error("레벨 컬럼 없음 (new_level or kibana.alert.severity 확인)")
+            filtered_df = df[df['new_level'] == 'medium'] if 'new_level' in df.columns else df
+            if '@timestamp' in filtered_df.columns:
+                filtered_df = filtered_df.sort_values('@timestamp', ascending=False)  # 최근 순
+            st.session_state.filtered_df = filtered_df
+            simplified_df = filtered_df[['new_level', 'message', 'winlog.user.name', 'ml_score']] if 'winlog.user.name' in filtered_df.columns else filtered_df[['new_level', 'message', 'ml_score']]
+            simplified_df['winlog.user.name'] = simplified_df.get('winlog.user.name', 'N/A') # 사용자 없으면 N/A
+            st.dataframe(simplified_df) # 간단 테이블 표시
     with col3:
         if st.button("HIGH"):
             df = st.session_state.df
-            level_col = 'new_level' if 'new_level' in df.columns else 'kibana.alert.severity' if 'kibana.alert.severity' in df.columns else None
-            if level_col:
-                filtered_df = df[df[level_col].str.lower() == 'high']
-                if '@timestamp' in filtered_df.columns:
-                    filtered_df = filtered_df.sort_values('@timestamp', ascending=False)  # 최근 순
-                st.session_state.filtered_df = filtered_df
-                simplified_df = filtered_df[['new_level', 'message', 'winlog.user.name', 'ml_score']] if 'winlog.user.name' in filtered_df.columns else filtered_df[['new_level', 'message', 'ml_score']]
-                simplified_df['winlog.user.name'] = simplified_df.get('winlog.user.name', 'N/A') # 사용자 없으면 N/A
-                st.dataframe(simplified_df) # 간단 테이블 표시
-            else:
-                st.error("레벨 컬럼 없음 (new_level or kibana.alert.severity 확인)")
+            filtered_df = df[df['new_level'] == 'high'] if 'new_level' in df.columns else df
+            if '@timestamp' in filtered_df.columns:
+                filtered_df = filtered_df.sort_values('@timestamp', ascending=False)  # 최근 순
+            st.session_state.filtered_df = filtered_df
+            simplified_df = filtered_df[['new_level', 'message', 'winlog.user.name', 'ml_score']] if 'winlog.user.name' in filtered_df.columns else filtered_df[['new_level', 'message', 'ml_score']]
+            simplified_df['winlog.user.name'] = simplified_df.get('winlog.user.name', 'N/A') # 사용자 없으면 N/A
+            st.dataframe(simplified_df) # 간단 테이블 표시
 
 # 3. ML 필터
 if 'df' in st.session_state and st.button("ML 필터링"):
@@ -178,22 +162,26 @@ if 'df' in st.session_state and st.button("ML 필터링"):
         df.to_csv('ml_filtered_logs.csv', index=False, encoding='utf-8-sig')
     except Exception as e:
         st.error(f"ML 필터링 에러: {e}. 데이터 컬럼 확인하거나 쿼리 범위 좁혀보세요.")
-# 4. SBOM 취약점 스캔
+# 4. SBOM 취약점 스캔 (Syft + Grype)
 st.subheader("SBOM 취약점 스캔")
 sbom_target = st.text_input("SBOM 대상 (e.g., ubuntu:latest)", "ubuntu:latest")
 if st.button("SBOM 스캔"):
-    with st.spinner("Trivy 스캔 중..."):
+    with st.spinner("Syft & Grype 스캔 중..."):
         try:
-            sbom_output = subprocess.run(["trivy", "image", "--format", "json", sbom_target], capture_output=True, text=True)
-            vulns = json.loads(sbom_output.stdout)
-            vulns_str = json.dumps(vulns.get('Results', [{}])[0].get('Vulnerabilities', 'No vulnerabilities found'), ensure_ascii=False)
+            # Syft로 SBOM 생성
+            subprocess.run(["syft", "scan", sbom_target, "-o", "spdx-json=sbom.json"], check=True)
+            # Grype로 취약점 스캔
+            grype_output = subprocess.run(["grype", "sbom:sbom.json", "-o", "json"], capture_output=True, text=True)
+            vulns = json.loads(grype_output.stdout)
+            vulns_str = json.dumps(vulns.get('matches', 'No vulnerabilities found'), ensure_ascii=False)
             st.json(vulns)
             if 'df' in st.session_state:
                 df = st.session_state.df
                 df['vulns'] = vulns_str
                 st.session_state.df = df # 업데이트 저장
         except Exception as e:
-            st.error(f"Trivy 에러: {e}. Trivy 설치 확인하세요.")
+            st.error(f"SBOM 에러: {e}. Syft/Grype 설치 확인하세요.")
+
 # 5. LLM 요약 & PDF
 if 'df' in st.session_state and st.button("LLM 요약 & PDF 생성"):
     df = st.session_state.df.copy() # 복사 사용
@@ -204,9 +192,11 @@ if 'df' in st.session_state and st.button("LLM 요약 & PDF 생성"):
             action = '관찰' if level == 'low' else '경고' if level == 'medium' else '격리'
             vulns_str = row.get('vulns', 'No vulnerabilities found')
             prompt = f"이 로그를 간결하게 요약하고, 잠재적 위협, 취약점 분석, 그리고 대응 방안을 제안하세요: {log_text}. 취약점: {vulns_str}. 레벨: {level} - 액션: {action}."
-            input_length = len(prompt.split())
-            effective_max = max(50, min(200, input_length // 2))
-            summary = summarizer(prompt, max_length=effective_max, min_length=50, do_sample=False, max_new_tokens=None)[0]['summary_text']
+            response = openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}]
+            )
+            summary = response.choices[0].message.content
             df.at[index, 'summary'] = summary
     st.session_state.df = df # 업데이트 저장
     st.success("요약 완료!")
