@@ -41,6 +41,12 @@ es = st.session_state.es
 # 앱 타이틀
 st.title("로그 분석 파이프라인 웹 앱 (POC)")
 
+# 사이드바에 추가 옵션 (있어보이게: 로그 검색 필터)
+with st.sidebar:
+    st.title("추가 옵션")
+    search_term = st.text_input("로그 검색 (메시지 내 키워드)", "")
+    min_ml_score = st.slider("최소 ML 점수 필터", 0.0, 10.0, 0.0)
+
 # 1. 로그 연동 (EVTX 업로드 & ES 인덱싱)
 evtx_file = st.file_uploader("EVTX 로그 업로드", type="evtx")
 if evtx_file and st.button("ES에 인덱싱"):
@@ -87,6 +93,12 @@ def display_paginated_df(df, page_size=30):
         st.info("표시할 로그가 없습니다.")
         return
     
+    # 추가 필터 적용 (사이드바 검색)
+    if search_term and 'message' in df.columns:
+        df = df[df['message'].str.contains(search_term, case=False, na=False)]
+    if 'ml_score' in df.columns:
+        df = df[df['ml_score'] >= min_ml_score]
+    
     # 페이징 컨트롤
     total_pages = (len(df) - 1) // page_size + 1
     col1, col2, col3 = st.columns([1, 3, 1])
@@ -104,10 +116,11 @@ def display_paginated_df(df, page_size=30):
     end = start + page_size
     page_df = df.iloc[start:end]
     
-    # 표시 컬럼 선택
+    # 표시 컬럼 선택 (더 있어보이게: 추가 컬럼)
     columns_to_show = []
     if 'level' in page_df.columns: columns_to_show.append('level')
     if 'new_level' in page_df.columns: columns_to_show.append('new_level')
+    if '@timestamp' in page_df.columns: columns_to_show.append('@timestamp')  # 타임스탬프 추가
     if 'message' in page_df.columns: columns_to_show.append('message')
     if 'winlog.user.name' in page_df.columns: columns_to_show.append('winlog.user.name')
     if 'ml_score' in page_df.columns: columns_to_show.append('ml_score')
@@ -115,7 +128,7 @@ def display_paginated_df(df, page_size=30):
     
     simplified_df = page_df[columns_to_show] if columns_to_show else page_df
     simplified_df['winlog.user.name'] = simplified_df.get('winlog.user.name', 'N/A')
-    st.dataframe(simplified_df)
+    st.dataframe(simplified_df, use_container_width=True)  # 더 넓게 표시
 
 # 3. 레벨별 필터링 버튼 (LOW/MEDIUM/HIGH)
 if 'df' in st.session_state:
@@ -149,14 +162,24 @@ if 'df' in st.session_state:
 # 4. ML 필터링 (MEDIUM/HIGH만 대상, 체크박스나 버튼으로 선택)
 if 'df' in st.session_state:
     st.subheader("의심 로그 ML 분석")
-    # MEDIUM/HIGH 로그만 필터링해서 보여주기 (선택 가능하게)
-    medium_high_df = st.session_state.df[st.session_state.df['level'].isin(['medium', 'high'])]
+    # MEDIUM/HIGH 로그만 필터링 (level이 low인 건 완전히 제외)
+    level_column = 'new_level' if 'new_level' in st.session_state.df.columns else 'level'
+    medium_high_df = st.session_state.df[st.session_state.df[level_column].isin(['medium', 'high', 'critical'])]
     if len(medium_high_df) > 0:
-        # 선택할 로그 (멀티셀렉트로 인덱스 선택)
+        # 보기 쉽게 format_func 개선: level, timestamp, message, user
+        def format_log(x):
+            row = medium_high_df.loc[x]
+            level = row.get(level_column, 'N/A').upper()
+            timestamp = row.get('@timestamp', 'N/A')
+            message = row.get('message', 'N/A')[:50] + '...'
+            user = row.get('winlog.user.name', 'N/A')
+            return f"{level} | {timestamp} | 사용자: {user} | {message}"
+        
+        # 멀티셀렉트 (더 자세한 포맷)
         selected_indices = st.multiselect(
             "ML 분석할 의심 로그 선택 (MEDIUM/HIGH만)",
             options=medium_high_df.index.tolist(),
-            format_func=lambda x: f"로그 {x}: {medium_high_df.loc[x, 'message'][:50]}..." if 'message' in medium_high_df.columns else f"로그 {x}"
+            format_func=format_log
         )
         
         if st.button("선택 로그 ML 분석"):
@@ -215,6 +238,10 @@ if 'df' in st.session_state:
                     st.session_state.filtered_df = st.session_state.df  # 전체 df로 업데이트해서 보여줌
                 except Exception as e:
                     st.error(f"ML 필터링 에러: {e}. 데이터 컬럼 확인하거나 선택 로그 확인하세요.")
+        
+        # 추가: MEDIUM/HIGH 로그 미리보기 테이블 (있어보이게)
+        with st.expander("MEDIUM/HIGH 로그 미리보기"):
+            display_paginated_df(medium_high_df)
     else:
         st.info("MEDIUM 또는 HIGH 레벨 로그가 없습니다.")
 
@@ -283,3 +310,12 @@ if 'df' in st.session_state and st.button("LLM 요약 & PDF 생성 (ML 7점 이�
 # 최종 표시 로직 (여기서 한 번만 호출)
 if 'filtered_df' in st.session_state:
     display_paginated_df(st.session_state.filtered_df)
+
+# 추가: 로그 통계 차트 (있어보이게)
+if 'df' in st.session_state and len(st.session_state.df) > 0:
+    with st.expander("로그 통계"):
+        level_counts = st.session_state.df[level_column].value_counts()
+        st.bar_chart(level_counts)
+        if 'ml_score' in st.session_state.df.columns:
+            st.subheader("ML 점수 분포")
+            st.hist_chart(st.session_state.df['ml_score'].dropna())
