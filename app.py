@@ -226,4 +226,3 @@ if 'df' in st.session_state and st.button("LLM 요약 & PDF 생성"):
     doc.build(elements)
     pdf_buffer.seek(0)
     st.download_button("PDF 다운로드", pdf_buffer, file_name="report.pdf", mime="application/pdf")
- 
