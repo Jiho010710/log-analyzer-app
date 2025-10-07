@@ -185,18 +185,16 @@ if 'df' in st.session_state:
     end_date = st.date_input("종료 날짜", today)
     
     # 필터링된 df 생성
-    df = st.session_state.df
-    time_filtered_df = df.copy()  # 기본 전체
+    df = st.session_state.df.copy()  # 복사본 사용
     if '@timestamp' in df.columns:
         df['@timestamp'] = pd.to_datetime(df['@timestamp'], errors='coerce')
-        if start_date and end_date:
-            start_dt = pd.to_datetime(start_date)
-            end_dt = pd.to_datetime(end_date) + timedelta(days=1)
-            time_filtered_df = df[(df['@timestamp'] >= start_dt) & (df['@timestamp'] < end_dt)]  # < 로 변경하여 다음 날 미포함
-        else:
-            st.warning("날짜가 선택되지 않아 기간 필터링을 생략합니다.")
+    time_filtered_df = df
+    if '@timestamp' in df.columns and start_date and end_date:
+        start_dt = pd.to_datetime(start_date, utc=True)
+        end_dt = pd.to_datetime(end_date, utc=True) + timedelta(days=1)
+        time_filtered_df = df[(df['@timestamp'] >= start_dt) & (df['@timestamp'] < end_dt)]
     else:
-        st.warning("타임스탬프 컬럼이 없어 기간 필터링을 적용할 수 없습니다.")
+        st.warning("타임스탬프 컬럼이 없거나 날짜가 선택되지 않아 기간 필터링을 생략합니다.")
     
     selected_df = time_filtered_df[time_filtered_df[level_column].isin(selected_levels)]
     
