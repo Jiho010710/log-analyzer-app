@@ -186,11 +186,16 @@ if 'df' in st.session_state:
     
     # 필터링된 df 생성
     df = st.session_state.df
+    time_filtered_df = df.copy()  # 기본 전체
     if '@timestamp' in df.columns:
         df['@timestamp'] = pd.to_datetime(df['@timestamp'], errors='coerce')
-        time_filtered_df = df[(df['@timestamp'] >= pd.to_datetime(start_date)) & (df['@timestamp'] <= pd.to_datetime(end_date) + timedelta(days=1))]
+        if start_date and end_date:
+            start_dt = pd.to_datetime(start_date)
+            end_dt = pd.to_datetime(end_date) + timedelta(days=1)
+            time_filtered_df = df[(df['@timestamp'] >= start_dt) & (df['@timestamp'] < end_dt)]  # < 로 변경하여 다음 날 미포함
+        else:
+            st.warning("날짜가 선택되지 않아 기간 필터링을 생략합니다.")
     else:
-        time_filtered_df = df
         st.warning("타임스탬프 컬럼이 없어 기간 필터링을 적용할 수 없습니다.")
     
     selected_df = time_filtered_df[time_filtered_df[level_column].isin(selected_levels)]
