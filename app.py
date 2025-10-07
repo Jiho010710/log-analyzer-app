@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from openai import OpenAI  # GPT 사용
+from vt import Client as VTClient  # VirusTotal 사용
 from elasticsearch import Elasticsearch
 from sklearn.ensemble import IsolationForest
 from reportlab.lib.pagesizes import letter
@@ -20,6 +21,9 @@ warnings.filterwarnings("ignore")
 
 # GPT 설정 (API 키 secrets 사용)
 openai_client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+
+# VirusTotal 설정 (API 키 secrets 사용)
+vt_client = VTClient(st.secrets["VIRUSTOTAL_API_KEY"])
 
 # ES 연결 (사용자 입력 호스트/인증, form으로 감싸서 오류 방지)
 with st.sidebar.form(key="es_config_form"):
@@ -87,27 +91,45 @@ if 'df' in st.session_state:
     with col1:
         if st.button("LOW"):
             df = st.session_state.df
-            filtered_df = df[df['new_level'] == 'low'] if 'new_level' in df.columns else df
-            if '@timestamp' in filtered_df.columns:
-                filtered_df = filtered_df.sort_values('@timestamp', ascending=False)  # 최근 순
-            st.session_state.filtered_df = filtered_df
-            st.dataframe(filtered_df[['new_level', 'message', 'winlog.user.name', 'ml_score']])
+            level_col = 'new_level' if 'new_level' in df.columns else 'kibana.alert.severity' if 'kibana.alert.severity' in df.columns else None
+            if level_col:
+                filtered_df = df[df[level_col].str.lower() == 'low']
+                if '@timestamp' in filtered_df.columns:
+                    filtered_df = filtered_df.sort_values('@timestamp', ascending=False)  # 최근 순
+                st.session_state.filtered_df = filtered_df
+                simplified_df = filtered_df[['new_level', 'message', 'winlog.user.name', 'ml_score']] if 'winlog.user.name' in filtered_df.columns else filtered_df[['new_level', 'message', 'ml_score']]
+                simplified_df['winlog.user.name'] = simplified_df.get('winlog.user.name', 'N/A') # 사용자 없으면 N/A
+                st.dataframe(simplified_df) # 간단 테이블 표시
+            else:
+                st.error("레벨 컬럼 없음 (new_level or kibana.alert.severity 확인)")
     with col2:
         if st.button("MEDIUM"):
             df = st.session_state.df
-            filtered_df = df[df['new_level'] == 'medium'] if 'new_level' in df.columns else df
-            if '@timestamp' in filtered_df.columns:
-                filtered_df = filtered_df.sort_values('@timestamp', ascending=False)  # 최근 순
-            st.session_state.filtered_df = filtered_df
-            st.dataframe(filtered_df[['new_level', 'message', 'winlog.user.name', 'ml_score']])
+            level_col = 'new_level' if 'new_level' in df.columns else 'kibana.alert.severity' if 'kibana.alert.severity' in df.columns else None
+            if level_col:
+                filtered_df = df[df[level_col].str.lower() == 'medium']
+                if '@timestamp' in filtered_df.columns:
+                    filtered_df = filtered_df.sort_values('@timestamp', ascending=False)  # 최근 순
+                st.session_state.filtered_df = filtered_df
+                simplified_df = filtered_df[['new_level', 'message', 'winlog.user.name', 'ml_score']] if 'winlog.user.name' in filtered_df.columns else filtered_df[['new_level', 'message', 'ml_score']]
+                simplified_df['winlog.user.name'] = simplified_df.get('winlog.user.name', 'N/A') # 사용자 없으면 N/A
+                st.dataframe(simplified_df) # 간단 테이블 표시
+            else:
+                st.error("레벨 컬럼 없음 (new_level or kibana.alert.severity 확인)")
     with col3:
         if st.button("HIGH"):
             df = st.session_state.df
-            filtered_df = df[df['new_level'] == 'high'] if 'new_level' in df.columns else df
-            if '@timestamp' in filtered_df.columns:
-                filtered_df = filtered_df.sort_values('@timestamp', ascending=False)  # 최근 순
-            st.session_state.filtered_df = filtered_df
-            st.dataframe(filtered_df[['new_level', 'message', 'winlog.user.name', 'ml_score']])
+            level_col = 'new_level' if 'new_level' in df.columns else 'kibana.alert.severity' if 'kibana.alert.severity' in df.columns else None
+            if level_col:
+                filtered_df = df[df[level_col].str.lower() == 'high']
+                if '@timestamp' in filtered_df.columns:
+                    filtered_df = filtered_df.sort_values('@timestamp', ascending=False)  # 최근 순
+                st.session_state.filtered_df = filtered_df
+                simplified_df = filtered_df[['new_level', 'message', 'winlog.user.name', 'ml_score']] if 'winlog.user.name' in filtered_df.columns else filtered_df[['new_level', 'message', 'ml_score']]
+                simplified_df['winlog.user.name'] = simplified_df.get('winlog.user.name', 'N/A') # 사용자 없으면 N/A
+                st.dataframe(simplified_df) # 간단 테이블 표시
+            else:
+                st.error("레벨 컬럼 없음 (new_level or kibana.alert.severity 확인)")
 
 # 3. ML 필터
 if 'df' in st.session_state and st.button("ML 필터링"):
