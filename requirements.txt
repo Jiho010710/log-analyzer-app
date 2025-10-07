@@ -7,3 +7,4 @@ scikit-learn
 evtx
 xmltodict
 torch
+openai
