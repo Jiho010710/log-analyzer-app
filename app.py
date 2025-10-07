@@ -80,6 +80,9 @@ if st.button("모든 로그 가져오기"):
 
 # 페이징 함수 (한 페이지 30개)
 def display_paginated_df(df, page_size=30):
+    if 'page' not in st.session_state:
+        st.session_state.page = 0
+    
     if len(df) == 0:
         st.info("표시할 로그가 없습니다.")
         return
@@ -88,10 +91,10 @@ def display_paginated_df(df, page_size=30):
     total_pages = (len(df) - 1) // page_size + 1
     col1, col2, col3 = st.columns([1, 3, 1])
     with col1:
-        if st.button("이전 페이지") and st.session_state.page > 0:
+        if st.button("이전 페이지", key="prev_page") and st.session_state.page > 0:
             st.session_state.page -= 1
     with col3:
-        if st.button("다음 페이지") and st.session_state.page < total_pages - 1:
+        if st.button("다음 페이지", key="next_page") and st.session_state.page < total_pages - 1:
             st.session_state.page += 1
     with col2:
         st.write(f"페이지 {st.session_state.page + 1} / {total_pages}")
@@ -125,31 +128,23 @@ if 'df' in st.session_state:
             filtered_df = st.session_state.df[st.session_state.df[level_column] == 'low']
             st.session_state.filtered_df = filtered_df
             st.session_state.page = 0
-            display_paginated_df(filtered_df)
     
     with col2:
         if st.button("MEDIUM"):
             filtered_df = st.session_state.df[st.session_state.df[level_column] == 'medium']
             st.session_state.filtered_df = filtered_df
             st.session_state.page = 0
-            display_paginated_df(filtered_df)
     
     with col3:
         if st.button("HIGH"):
             filtered_df = st.session_state.df[st.session_state.df[level_column] == 'high']
             st.session_state.filtered_df = filtered_df
             st.session_state.page = 0
-            display_paginated_df(filtered_df)
     
     # 전체 로그 보기 버튼
     if st.button("전체 로그 보기"):
         st.session_state.filtered_df = st.session_state.df.copy()
         st.session_state.page = 0
-        display_paginated_df(st.session_state.filtered_df)
-
-    # 현재 필터링된 df 표시 (버튼 누르지 않았을 때 기본 표시)
-    if 'filtered_df' in st.session_state:
-        display_paginated_df(st.session_state.filtered_df)
 
 # 4. ML 필터링 (MEDIUM/HIGH만 대상, 체크박스나 버튼으로 선택)
 if 'df' in st.session_state:
@@ -217,7 +212,7 @@ if 'df' in st.session_state:
                         st.session_state.df.at[idx, 'new_level'] = df_selected.at[idx, 'new_level']
                     
                     st.success("ML 분석 완료! (선택 로그만)")
-                    display_paginated_df(st.session_state.df)
+                    st.session_state.filtered_df = st.session_state.df  # 전체 df로 업데이트해서 보여줌
                 except Exception as e:
                     st.error(f"ML 필터링 에러: {e}. 데이터 컬럼 확인하거나 선택 로그 확인하세요.")
     else:
@@ -249,7 +244,7 @@ if 'df' in st.session_state and st.button("LLM 요약 & PDF 생성 (ML 7점 이�
             st.session_state.df.at[idx, 'summary'] = high_score_df.at[idx, 'summary']
         
         st.success("요약 완료! (ML 7점 이상 로그만)")
-        display_paginated_df(high_score_df)
+        st.session_state.filtered_df = high_score_df  # high_score_df로 업데이트해서 보여줌
         
         # PDF 생성
         pdf_buffer = io.BytesIO()
@@ -284,3 +279,7 @@ if 'df' in st.session_state and st.button("LLM 요약 & PDF 생성 (ML 7점 이�
         doc.build(elements)
         pdf_buffer.seek(0)
         st.download_button("PDF 다운로드", pdf_buffer, file_name="high_score_report.pdf", mime="application/pdf")
+
+# 최종 표시 로직 (여기서 한 번만 호출)
+if 'filtered_df' in st.session_state:
+    display_paginated_df(st.session_state.filtered_df)
