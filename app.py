@@ -187,7 +187,7 @@ if 'df' in st.session_state:
     # 필터링된 df 생성
     df = st.session_state.df.copy()  # 복사본 사용
     if '@timestamp' in df.columns:
-        df['@timestamp'] = pd.to_datetime(df['@timestamp'], errors='coerce')
+        df['@timestamp'] = pd.to_datetime(df['@timestamp'], errors='coerce', utc=True)
     time_filtered_df = df
     if '@timestamp' in df.columns and start_date and end_date:
         start_dt = pd.to_datetime(start_date, utc=True)
@@ -236,9 +236,19 @@ if 'df' in st.session_state:
                             df_selected[col] = pd.to_numeric(df_selected[col], errors='coerce')
                     
                     df_features = df_selected[features].fillna(0)
+                    
+                    # 전체 df로 모델 학습하여 다양성 확보
+                    full_df = st.session_state.df.copy()
+                    for col in features:
+                        if col in ['winlog.event_data.GrantedAccess', 'winlog.event_data.ProcessId', 'winlog.event_data.ThreadId']:
+                            full_df[col] = full_df[col].apply(hex_to_int)
+                        else:
+                            full_df[col] = pd.to_numeric(full_df[col], errors='coerce')
+                    full_features = full_df[features].fillna(0)
+                    
                     model = IsolationForest(contamination='auto', random_state=42)
-                    model.fit(df_features)
-                    anomaly_scores = model.decision_function(df_features)
+                    model.fit(full_features)  # 전체 데이터로 fit
+                    anomaly_scores = model.decision_function(df_features)  # 선택된 데이터에 대해 score
                     
                     # anomaly_score: 낮을수록 이상치 -> -anomaly_scores로 높을수록 이상치
                     anomaly_score = -anomaly_scores
@@ -289,64 +299,67 @@ if 'df' in st.session_state:
 # 5. LLM 요약 & PDF (ML 점수 7 이상인 로그만 자동 대상)
 if 'df' in st.session_state and st.button("LLM 요약 & PDF 생성 (ML 7점 이상 로그만)"):
     # ML 점수 7 이상 로그 필터링
-    high_score_df = st.session_state.df[st.session_state.df.get('ml_score', 0) > 7].copy()
-    if len(high_score_df) == 0:
-        st.warning("ML 점수 7점 이상 로그가 없습니다.")
+    if 'ml_score' not in st.session_state.df.columns:
+        st.warning("ML 점수가 계산되지 않았습니다. 먼저 ML 분석을 수행하세요.")
     else:
-        with st.spinner("요약 중..."):
+        high_score_df = st.session_state.df[st.session_state.df['ml_score'].fillna(0) > 7].copy()
+        if len(high_score_df) == 0:
+            st.warning("ML 점수 7점 이상 로그가 없습니다.")
+        else:
+            with st.spinner("요약 중..."):
+                for index, row in high_score_df.iterrows():
+                    level = row.get('new_level', row.get('level', 'low'))
+                    log_text = row.get('message', str(row))
+                    action = '관찰' if level == 'low' else '경고' if level == 'medium' else '격리'
+                    vulns_str = row.get('vulns', 'No vulnerabilities found')
+                    prompt = f"이 로그를 간결하게 요약하고, 잠재적 위협, 취약점 분석, 그리고 대응 방안을 제안하세요: {log_text}. 취약점: {vulns_str}. 레벨: {level} - 액션: {action}."
+                    response = openai_client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[{"role": "user", "content": prompt}]
+                    )
+                    summary = response.choices[0].message.content
+                    high_score_df.at[index, 'summary'] = summary
+            
+            # 원본 df 업데이트
+            for idx in high_score_df.index:
+                st.session_state.df.at[idx, 'summary'] = high_score_df.at[idx, 'summary']
+            
+            st.success("요약 완료! (ML 7점 이상 로그만)")
+            st.session_state.filtered_df = high_score_df  # high_score_df로 업데이트해서 보여줌
+            
+            # PDF 생성
+            pdf_buffer = io.BytesIO()
+            font_path = './gulim.ttc'  # repo에 업로드된 폰트 사용
+            pdfmetrics.registerFont(TTFont('Gulim', font_path))
+            doc = SimpleDocTemplate(pdf_buffer, pagesize=letter)
+            styles = getSampleStyleSheet()
+            body_style = ParagraphStyle('Body', parent=styles['Normal'], fontName='Gulim', fontSize=10, wordWrap='CJK')
+            elements = [Paragraph("로그 분석 보고서 (ML 7점 이상)", styles['Title'])]
+            data = [['로그 ID', '메시지 (짧게)', '레벨 | ML Score', '요약']]
             for index, row in high_score_df.iterrows():
-                level = row.get('new_level', row.get('level', 'low'))
-                log_text = row.get('message', str(row))
-                action = '관찰' if level == 'low' else '경고' if level == 'medium' else '격리'
-                vulns_str = row.get('vulns', 'No vulnerabilities found')
-                prompt = f"이 로그를 간결하게 요약하고, 잠재적 위협, 취약점 분석, 그리고 대응 방안을 제안하세요: {log_text}. 취약점: {vulns_str}. 레벨: {level} - 액션: {action}."
-                response = openai_client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": prompt}]
-                )
-                summary = response.choices[0].message.content
-                high_score_df.at[index, 'summary'] = summary
-        
-        # 원본 df 업데이트
-        for idx in high_score_df.index:
-            st.session_state.df.at[idx, 'summary'] = high_score_df.at[idx, 'summary']
-        
-        st.success("요약 완료! (ML 7점 이상 로그만)")
-        st.session_state.filtered_df = high_score_df  # high_score_df로 업데이트해서 보여줌
-        
-        # PDF 생성
-        pdf_buffer = io.BytesIO()
-        font_path = './gulim.ttc'  # repo에 업로드된 폰트 사용
-        pdfmetrics.registerFont(TTFont('Gulim', font_path))
-        doc = SimpleDocTemplate(pdf_buffer, pagesize=letter)
-        styles = getSampleStyleSheet()
-        body_style = ParagraphStyle('Body', parent=styles['Normal'], fontName='Gulim', fontSize=10, wordWrap='CJK')
-        elements = [Paragraph("로그 분석 보고서 (ML 7점 이상)", styles['Title'])]
-        data = [['로그 ID', '메시지 (짧게)', '레벨 | ML Score', '요약']]
-        for index, row in high_score_df.iterrows():
-            msg_short = Paragraph(row.get('message', 'N/A')[:50] + '...', body_style)
-            level_score = Paragraph(f"{row.get('new_level', row.get('level'))} | {row['ml_score']}", body_style)
-            summary_para = Paragraph(row['summary'], body_style)
-            data.append([Paragraph(str(index), body_style), msg_short, level_score, summary_para])
-        col_widths = [50, 150, 100, 300]
-        table = Table(data, colWidths=col_widths)
-        table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, -1), 'Gulim'),
-            ('FONTSIZE', (0, 0), (-1, 0), 14),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black),
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('LEFTPADDING', (0, 0), (-1, -1), 6),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 6),
-        ]))
-        elements.append(table)
-        doc.build(elements)
-        pdf_buffer.seek(0)
-        st.download_button("PDF 다운로드", pdf_buffer, file_name="high_score_report.pdf", mime="application/pdf")
+                msg_short = Paragraph(row.get('message', 'N/A')[:50] + '...', body_style)
+                level_score = Paragraph(f"{row.get('new_level', row.get('level'))} | {row['ml_score']}", body_style)
+                summary_para = Paragraph(row['summary'], body_style)
+                data.append([Paragraph(str(index), body_style), msg_short, level_score, summary_para])
+            col_widths = [50, 150, 100, 300]
+            table = Table(data, colWidths=col_widths)
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, -1), 'Gulim'),
+                ('FONTSIZE', (0, 0), (-1, 0), 14),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+            ]))
+            elements.append(table)
+            doc.build(elements)
+            pdf_buffer.seek(0)
+            st.download_button("PDF 다운로드", pdf_buffer, file_name="high_score_report.pdf", mime="application/pdf")
 
 # 최종 표시 로직 (여기서 한 번만 호출)
 if 'filtered_df' in st.session_state:
