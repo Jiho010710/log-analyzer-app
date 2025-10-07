@@ -1,10 +1,12 @@
 streamlit
-transformers
-reportlab
-pandas
+openai
 elasticsearch
 scikit-learn
+reportlab
+pandas
 evtx
 xmltodict
+vt
 torch
-openai
+syft
+grype
