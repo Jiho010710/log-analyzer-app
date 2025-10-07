@@ -14,6 +14,7 @@ import io
 import warnings
 from evtx import PyEvtxParser
 import xmltodict
+from datetime import datetime, timedelta
 warnings.filterwarnings("ignore")
 
 # GPT 설정 (API 키 secrets 사용)
@@ -84,10 +85,10 @@ if st.button("모든 로그 가져오기"):
     except Exception as e:
         st.error(f"ES 쿼리 에러: {e}")
 
-# 페이징 함수 (한 페이지 30개)
-def display_paginated_df(df, page_size=30):
-    if 'page' not in st.session_state:
-        st.session_state.page = 0
+# 페이징 함수 (한 페이지 30개, key_prefix로 중복 키 방지)
+def display_paginated_df(df, page_size=30, key_prefix="main"):
+    if f'page_{key_prefix}' not in st.session_state:
+        st.session_state[f'page_{key_prefix}'] = 0
     
     if len(df) == 0:
         st.info("표시할 로그가 없습니다.")
@@ -103,16 +104,16 @@ def display_paginated_df(df, page_size=30):
     total_pages = (len(df) - 1) // page_size + 1
     col1, col2, col3 = st.columns([1, 3, 1])
     with col1:
-        if st.button("이전 페이지", key="prev_page") and st.session_state.page > 0:
-            st.session_state.page -= 1
+        if st.button("이전 페이지", key=f"prev_page_{key_prefix}") and st.session_state[f'page_{key_prefix}'] > 0:
+            st.session_state[f'page_{key_prefix}'] -= 1
     with col3:
-        if st.button("다음 페이지", key="next_page") and st.session_state.page < total_pages - 1:
-            st.session_state.page += 1
+        if st.button("다음 페이지", key=f"next_page_{key_prefix}") and st.session_state[f'page_{key_prefix}'] < total_pages - 1:
+            st.session_state[f'page_{key_prefix}'] += 1
     with col2:
-        st.write(f"페이지 {st.session_state.page + 1} / {total_pages}")
+        st.write(f"페이지 {st.session_state[f'page_{key_prefix}'] + 1} / {total_pages}")
     
     # 현재 페이지 데이터
-    start = st.session_state.page * page_size
+    start = st.session_state[f'page_{key_prefix}'] * page_size
     end = start + page_size
     page_df = df.iloc[start:end]
     
@@ -140,55 +141,71 @@ if 'df' in st.session_state:
         if st.button("LOW"):
             filtered_df = st.session_state.df[st.session_state.df[level_column] == 'low']
             st.session_state.filtered_df = filtered_df
-            st.session_state.page = 0
+            st.session_state.page_main = 0  # 메인 페이지 초기화
     
     with col2:
         if st.button("MEDIUM"):
             filtered_df = st.session_state.df[st.session_state.df[level_column] == 'medium']
             st.session_state.filtered_df = filtered_df
-            st.session_state.page = 0
+            st.session_state.page_main = 0
     
     with col3:
         if st.button("HIGH"):
             filtered_df = st.session_state.df[st.session_state.df[level_column] == 'high']
             st.session_state.filtered_df = filtered_df
-            st.session_state.page = 0
+            st.session_state.page_main = 0
     
     # 전체 로그 보기 버튼
     if st.button("전체 로그 보기"):
         st.session_state.filtered_df = st.session_state.df.copy()
-        st.session_state.page = 0
+        st.session_state.page_main = 0
 
-# 4. ML 필터링 (MEDIUM/HIGH만 대상, 체크박스나 버튼으로 선택)
+# 4. ML 필터링 (레벨 체크박스와 기간 설정으로 대상 선택)
 if 'df' in st.session_state:
     st.subheader("의심 로그 ML 분석")
-    # MEDIUM/HIGH 로그만 필터링 (level이 low인 건 완전히 제외)
     level_column = 'new_level' if 'new_level' in st.session_state.df.columns else 'level'
-    medium_high_df = st.session_state.df[st.session_state.df[level_column].isin(['medium', 'high', 'critical'])]
-    if len(medium_high_df) > 0:
-        # 보기 쉽게 format_func 개선: level, timestamp, message, user
-        def format_log(x):
-            row = medium_high_df.loc[x]
-            level = row.get(level_column, 'N/A').upper()
-            timestamp = row.get('@timestamp', 'N/A')
-            message = row.get('message', 'N/A')[:50] + '...'
-            user = row.get('winlog.user.name', 'N/A')
-            return f"{level} | {timestamp} | 사용자: {user} | {message}"
-        
-        # 멀티셀렉트 (더 자세한 포맷)
-        selected_indices = st.multiselect(
-            "ML 분석할 의심 로그 선택 (MEDIUM/HIGH만)",
-            options=medium_high_df.index.tolist(),
-            format_func=format_log
-        )
+    
+    # 체크박스: Low, Medium, High
+    selected_levels = []
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.checkbox("LOW"):
+            selected_levels.append('low')
+    with col2:
+        if st.checkbox("MEDIUM", value=True):  # 기본 선택
+            selected_levels.append('medium')
+    with col3:
+        if st.checkbox("HIGH", value=True):  # 기본 선택
+            selected_levels.append('high')
+    
+    # 기간 설정 (시작/종료 날짜)
+    today = datetime.today()
+    default_start = today - timedelta(days=7)
+    start_date = st.date_input("시작 날짜", default_start)
+    end_date = st.date_input("종료 날짜", today)
+    
+    # 필터링된 df 생성
+    df = st.session_state.df
+    if '@timestamp' in df.columns:
+        df['@timestamp'] = pd.to_datetime(df['@timestamp'], errors='coerce')
+        time_filtered_df = df[(df['@timestamp'] >= pd.to_datetime(start_date)) & (df['@timestamp'] <= pd.to_datetime(end_date) + timedelta(days=1))]
+    else:
+        time_filtered_df = df
+        st.warning("타임스탬프 컬럼이 없어 기간 필터링을 적용할 수 없습니다.")
+    
+    selected_df = time_filtered_df[time_filtered_df[level_column].isin(selected_levels)]
+    
+    if len(selected_df) > 0:
+        st.info(f"선택된 로그 수: {len(selected_df)} (레벨: {', '.join(selected_levels)})")
         
         if st.button("선택 로그 ML 분석"):
-            if not selected_indices:
-                st.warning("로그를 선택하세요.")
+            # ML 분석은 MEDIUM/HIGH만 대상으로 제한 (Low 선택 시 경고)
+            ml_levels = [lvl for lvl in selected_levels if lvl in ['medium', 'high']]
+            if not ml_levels:
+                st.warning("ML 분석은 MEDIUM 또는 HIGH 레벨만 대상입니다. LOW는 분석되지 않습니다.")
             else:
+                df_selected = selected_df[selected_df[level_column].isin(ml_levels)].copy()
                 try:
-                    df_selected = st.session_state.df.loc[selected_indices].copy()
-                    
                     # GrantedAccess 변환
                     def hex_to_int(value):
                         if pd.isna(value) or str(value).strip() in ['-', '']:
@@ -216,7 +233,7 @@ if 'df' in st.session_state:
                             df_selected[col] = pd.to_numeric(df_selected[col], errors='coerce')
                     
                     df_features = df_selected[features].fillna(0)
-                    model = IsolationForest(contamination=0.1, random_state=42)  # contamination 0.1로 조정하여 더 많은 이상치検출
+                    model = IsolationForest(contamination='auto', random_state=42)
                     model.fit(df_features)
                     anomaly_scores = model.decision_function(df_features)
                     
@@ -237,7 +254,7 @@ if 'df' in st.session_state:
                     # ml_score: 1~10, 높은 이상치에 높은 점수
                     df_selected['ml_score'] = normalized * 9 + 1
                     
-                    # new_level 재매핑 (임계값 조정 가능, 여기서는 원래대로)
+                    # new_level 재매핑
                     def remap_level(row):
                         severity = row.get('kibana.alert.severity', 'low').lower()
                         if row['ml_score'] > 7 or severity in ['high', 'critical']:
@@ -250,35 +267,26 @@ if 'df' in st.session_state:
                     df_selected['new_level'] = df_selected.apply(remap_level, axis=1)
                     
                     # 원본 df 업데이트
+                    selected_indices = df_selected.index
                     for idx in selected_indices:
                         st.session_state.df.at[idx, 'ml_score'] = df_selected.at[idx, 'ml_score']
                         st.session_state.df.at[idx, 'new_level'] = df_selected.at[idx, 'new_level']
                     
-                    st.success("ML 분석 완료! (선택 로그만)")
+                    st.success("ML 분석 완료! (MEDIUM/HIGH 로그만)")
                     st.session_state.filtered_df = st.session_state.df  # 전체 df로 업데이트해서 보여줌
                 except Exception as e:
                     st.error(f"ML 필터링 에러: {e}. 데이터 컬럼 확인하거나 선택 로그 확인하세요.")
         
-        # 추가: MEDIUM/HIGH 로그 미리보기 테이블 (페이징 없이 간단히, 중복 방지)
-        with st.expander("MEDIUM/HIGH 로그 미리보기"):
-            columns_to_show = []
-            if level_column in medium_high_df.columns: columns_to_show.append(level_column)
-            if '@timestamp' in medium_high_df.columns: columns_to_show.append('@timestamp')
-            if 'message' in medium_high_df.columns: columns_to_show.append('message')
-            if 'winlog.user.name' in medium_high_df.columns: columns_to_show.append('winlog.user.name')
-            simplified_df = medium_high_df[columns_to_show] if columns_to_show else medium_high_df.head()
-            simplified_df['winlog.user.name'] = simplified_df.get('winlog.user.name', 'N/A')
-            st.dataframe(simplified_df, use_container_width=True)
+        # 추가: 선택 로그 미리보기 테이블 (있어보이게, 별도 key_prefix)
+        with st.expander("선택 로그 미리보기"):
+            display_paginated_df(selected_df, key_prefix="preview")
     else:
-        st.info("MEDIUM 또는 HIGH 레벨 로그가 없습니다.")
+        st.info("선택된 레벨 또는 기간에 해당하는 로그가 없습니다.")
 
 # 5. LLM 요약 & PDF (ML 점수 7 이상인 로그만 자동 대상)
 if 'df' in st.session_state and st.button("LLM 요약 & PDF 생성 (ML 7점 이상 로그만)"):
-    if 'ml_score' not in st.session_state.df.columns:
-        st.warning("ML 점수가 계산되지 않았습니다. 먼저 ML 분석을 수행하세요.")
-        high_score_df = pd.DataFrame()
-    else:
-        high_score_df = st.session_state.df[st.session_state.df['ml_score'] > 7].copy()
+    # ML 점수 7 이상 로그 필터링
+    high_score_df = st.session_state.df[st.session_state.df.get('ml_score', 0) > 7].copy()
     if len(high_score_df) == 0:
         st.warning("ML 점수 7점 이상 로그가 없습니다.")
     else:
@@ -314,7 +322,7 @@ if 'df' in st.session_state and st.button("LLM 요약 & PDF 생성 (ML 7점 이�
         data = [['로그 ID', '메시지 (짧게)', '레벨 | ML Score', '요약']]
         for index, row in high_score_df.iterrows():
             msg_short = Paragraph(row.get('message', 'N/A')[:50] + '...', body_style)
-            level_score = Paragraph(f"{row.get('new_level', row.get('level'))} | {row['ml_score']:.2f}", body_style)
+            level_score = Paragraph(f"{row.get('new_level', row.get('level'))} | {row['ml_score']}", body_style)
             summary_para = Paragraph(row['summary'], body_style)
             data.append([Paragraph(str(index), body_style), msg_short, level_score, summary_para])
         col_widths = [50, 150, 100, 300]
@@ -339,7 +347,7 @@ if 'df' in st.session_state and st.button("LLM 요약 & PDF 생성 (ML 7점 이�
 
 # 최종 표시 로직 (여기서 한 번만 호출)
 if 'filtered_df' in st.session_state:
-    display_paginated_df(st.session_state.filtered_df)
+    display_paginated_df(st.session_state.filtered_df, key_prefix="main")
 
 # 추가: 로그 통계 차트 (있어보이게)
 if 'df' in st.session_state and len(st.session_state.df) > 0:
