@@ -6,7 +6,4 @@ reportlab
 pandas
 evtx
 xmltodict
-vt
 torch
-syft
-grype
