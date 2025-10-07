@@ -11,7 +11,6 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 import json
 import io
-import subprocess
 import warnings
 from evtx import PyEvtxParser
 import xmltodict
@@ -162,25 +161,6 @@ if 'df' in st.session_state and st.button("ML 필터링"):
         df.to_csv('ml_filtered_logs.csv', index=False, encoding='utf-8-sig')
     except Exception as e:
         st.error(f"ML 필터링 에러: {e}. 데이터 컬럼 확인하거나 쿼리 범위 좁혀보세요.")
-# 4. SBOM 취약점 스캔 (Syft + Grype)
-st.subheader("SBOM 취약점 스캔")
-sbom_target = st.text_input("SBOM 대상 (e.g., ubuntu:latest)", "ubuntu:latest")
-if st.button("SBOM 스캔"):
-    with st.spinner("Syft & Grype 스캔 중..."):
-        try:
-            # Syft로 SBOM 생성
-            subprocess.run(["syft", "scan", sbom_target, "-o", "spdx-json=sbom.json"], check=True)
-            # Grype로 취약점 스캔
-            grype_output = subprocess.run(["grype", "sbom:sbom.json", "-o", "json"], capture_output=True, text=True)
-            vulns = json.loads(grype_output.stdout)
-            vulns_str = json.dumps(vulns.get('matches', 'No vulnerabilities found'), ensure_ascii=False)
-            st.json(vulns)
-            if 'df' in st.session_state:
-                df = st.session_state.df
-                df['vulns'] = vulns_str
-                st.session_state.df = df # 업데이트 저장
-        except Exception as e:
-            st.error(f"SBOM 에러: {e}. Syft/Grype 설치 확인하세요.")
 
 # 5. LLM 요약 & PDF
 if 'df' in st.session_state and st.button("LLM 요약 & PDF 생성"):
