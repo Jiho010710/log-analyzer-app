@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from openai import OpenAI  # GPT 사용
 from elasticsearch import Elasticsearch
-from sklearn.neighbors import LocalOutlierFactor
+from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
