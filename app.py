@@ -2,7 +2,8 @@ import streamlit as st
 import pandas as pd
 from openai import OpenAI  # GPT 사용
 from elasticsearch import Elasticsearch
-from sklearn.ensemble import IsolationForest
+from sklearn.neighbors import LocalOutlierFactor
+from sklearn.preprocessing import StandardScaler
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
@@ -246,9 +247,14 @@ if 'df' in st.session_state:
                             full_df[col] = pd.to_numeric(full_df[col], errors='coerce')
                     full_features = full_df[features].fillna(0)
                     
-                    model = IsolationForest(contamination='auto', random_state=42)
-                    model.fit(full_features)  # 전체 데이터로 fit
-                    anomaly_scores = model.decision_function(df_features)  # 선택된 데이터에 대해 score
+                    # 스케일링 추가
+                    scaler = StandardScaler()
+                    full_features_scaled = scaler.fit_transform(full_features)
+                    df_features_scaled = scaler.transform(df_features)
+                    
+                    model = IsolationForest(contamination=0.1, random_state=42, max_samples='auto', n_estimators=100)
+                    model.fit(full_features_scaled)  # 전체 데이터로 fit
+                    anomaly_scores = model.decision_function(df_features_scaled)  # 선택된 데이터에 대해 score
                     
                     # anomaly_score: 낮을수록 이상치 -> -anomaly_scores로 높을수록 이상치
                     anomaly_score = -anomaly_scores
@@ -338,7 +344,7 @@ if 'df' in st.session_state and st.button("LLM 요약 & PDF 생성 (ML 7점 이�
             data = [['로그 ID', '메시지 (짧게)', '레벨 | ML Score', '요약']]
             for index, row in high_score_df.iterrows():
                 msg_short = Paragraph(row.get('message', 'N/A')[:50] + '...', body_style)
-                level_score = Paragraph(f"{row.get('new_level', row.get('level'))} | {row['ml_score']}", body_style)
+                level_score = Paragraph(f"{row.get('new_level', row.get('level'))} | {row['ml_score']:.2f}", body_style)
                 summary_para = Paragraph(row['summary'], body_style)
                 data.append([Paragraph(str(index), body_style), msg_short, level_score, summary_para])
             col_widths = [50, 150, 100, 300]
