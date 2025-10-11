@@ -43,7 +43,7 @@ if 'es' not in st.session_state:
 es = st.session_state.es
 
 # 앱 타이틀
-st.title("로그 분석 파이프라인 웹 앱 (POC) - Wazuh/Kibana 스타일 대시보드")
+st.title("SCP Shield")
 
 # 사이드바에 추가 옵션 (있어보이게: 로그 검색 필터, 알림 임계값 등)
 with st.sidebar:
@@ -148,24 +148,24 @@ with tab2:  # 로그 조회 탭
             if st.button("LOW"):
                 filtered_df = st.session_state.df[st.session_state.df[level_column] == 'low']
                 st.session_state.filtered_df = filtered_df
-                st.session_state.page_main = 0
+                st.session_state.page_logs = 0  # 로그 탭 페이징 초기화
         
         with col2:
             if st.button("MEDIUM"):
                 filtered_df = st.session_state.df[st.session_state.df[level_column] == 'medium']
                 st.session_state.filtered_df = filtered_df
-                st.session_state.page_main = 0
+                st.session_state.page_logs = 0
         
         with col3:
             if st.button("HIGH"):
                 filtered_df = st.session_state.df[st.session_state.df[level_column] == 'high']
                 st.session_state.filtered_df = filtered_df
-                st.session_state.page_main = 0
+                st.session_state.page_logs = 0
         
         # 전체 로그 보기 버튼
         if st.button("전체 로그 보기"):
             st.session_state.filtered_df = st.session_state.df.copy()
-            st.session_state.page_main = 0
+            st.session_state.page_logs = 0
 
     # 필터링 추가 (Event ID 필터 적용)
     if 'filtered_df' in st.session_state:
