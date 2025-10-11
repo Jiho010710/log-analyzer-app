@@ -53,6 +53,52 @@ with st.sidebar:
     alert_threshold = st.slider("알림 임계값 (ML 점수)", 5.0, 10.0, 7.0)  # 추가: 알림 기능 위한 임계값
     event_id_filter = st.text_input("Event ID 필터", "")  # 추가: Event ID 필터
 
+# 페이징 함수 (한 페이지 30개, key_prefix로 중복 키 방지)
+def display_paginated_df(df, page_size=30, key_prefix="main"):
+    if f'page_{key_prefix}' not in st.session_state:
+        st.session_state[f'page_{key_prefix}'] = 0
+    
+    if len(df) == 0:
+        st.info("표시할 로그가 없습니다.")
+        return
+    
+    # 추가 필터 적용 (사이드바 검색)
+    if search_term and 'message' in df.columns:
+        df = df[df['message'].str.contains(search_term, case=False, na=False)]
+    if 'ml_score' in df.columns:
+        df = df[df['ml_score'] >= min_ml_score]
+    
+    # 페이징 컨트롤
+    total_pages = (len(df) - 1) // page_size + 1
+    col1, col2, col3 = st.columns([1, 3, 1])
+    with col1:
+        if st.button("이전 페이지", key=f"prev_page_{key_prefix}") and st.session_state[f'page_{key_prefix}'] > 0:
+            st.session_state[f'page_{key_prefix}'] -= 1
+    with col3:
+        if st.button("다음 페이지", key=f"next_page_{key_prefix}") and st.session_state[f'page_{key_prefix}'] < total_pages - 1:
+            st.session_state[f'page_{key_prefix}'] += 1
+    with col2:
+        st.write(f"페이지 {st.session_state[f'page_{key_prefix}'] + 1} / {total_pages}")
+    
+    # 현재 페이지 데이터
+    start = st.session_state[f'page_{key_prefix}'] * page_size
+    end = start + page_size
+    page_df = df.iloc[start:end]
+    
+    # 표시 컬럼 선택 (더 있어보이게: 추가 컬럼)
+    columns_to_show = []
+    if 'level' in page_df.columns: columns_to_show.append('level')
+    if 'new_level' in page_df.columns: columns_to_show.append('new_level')
+    if '@timestamp' in page_df.columns: columns_to_show.append('@timestamp')  # 타임스탬프 추가
+    if 'message' in page_df.columns: columns_to_show.append('message')
+    if 'winlog.user.name' in page_df.columns: columns_to_show.append('winlog.user.name')
+    if 'ml_score' in page_df.columns: columns_to_show.append('ml_score')
+    if 'summary' in page_df.columns: columns_to_show.append('summary')
+    
+    simplified_df = page_df[columns_to_show] if columns_to_show else page_df
+    simplified_df['winlog.user.name'] = simplified_df.get('winlog.user.name', 'N/A')
+    st.dataframe(simplified_df, use_container_width=True)  # 더 넓게 표시
+
 # 탭 구조 추가 (Kibana처럼: Dashboard, Logs, Analysis, Reports)
 tab1, tab2, tab3, tab4 = st.tabs(["대시보드", "로그 조회", "ML 분석", "보고서 생성"])
 
@@ -134,7 +180,7 @@ with tab2:  # 로그 조회 탭
             
             st.session_state.df = df
             st.session_state.filtered_df = df.copy()
-            st.session_state.page = 0
+            st.session_state.page_logs = 0  # 페이징 초기화
             st.success(f"총 {len(df)}개 로그 가져옴")
         except Exception as e:
             st.error(f"ES 쿼리 에러: {e}")
