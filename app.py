@@ -18,7 +18,6 @@ from evtx import PyEvtxParser
 import xmltodict
 from datetime import datetime, timedelta
 import altair as alt  # 대시보드 시각화 추가
-import plotly.express as px  # 대시보드 시각화 추가
 warnings.filterwarnings("ignore")
 
 # GPT 설정 (API 키 secrets 사용)
@@ -74,21 +73,28 @@ with tab1:  # 대시보드 탭 (Wazuh/Kibana 스타일 시각화 추가)
             ).properties(title="시간별 로그 분포").interactive()
             st.altair_chart(time_chart, use_container_width=True)
         
-        # 레벨 분포 Pie Chart (Plotly 사용)
-        level_counts = df['level'].value_counts()
-        fig = px.pie(level_counts, values=level_counts.values, names=level_counts.index, title="로그 레벨 분포")
-        st.plotly_chart(fig, use_container_width=True)
+        # 레벨 분포 Pie Chart (Altair 사용)
+        level_counts = df['level'].value_counts().reset_index()
+        level_counts.columns = ['level', 'count']
+        pie_chart = alt.Chart(level_counts).mark_arc().encode(
+            theta='count',
+            color='level',
+            tooltip=['level', 'count']
+        ).properties(title="로그 레벨 분포").interactive()
+        st.altair_chart(pie_chart, use_container_width=True)
         
         # Top 5 Users/Events (표 형식)
         if 'winlog.user.name' in df.columns:
-            top_users = df['winlog.user.name'].value_counts().head(5)
+            top_users = df['winlog.user.name'].value_counts().head(5).reset_index()
+            top_users.columns = ['User', 'Count']
             st.subheader("Top 5 Users")
-            st.bar_chart(top_users)
+            st.table(top_users)
         
         if 'winlog.event_id' in df.columns:
-            top_events = df['winlog.event_id'].value_counts().head(5)
+            top_events = df['winlog.event_id'].value_counts().head(5).reset_index()
+            top_events.columns = ['Event ID', 'Count']
             st.subheader("Top 5 Events")
-            st.bar_chart(top_events)
+            st.table(top_events)
         
         # 알림 위젯 (High ML 점수 로그 수)
         if 'ml_score' in df.columns:
@@ -328,7 +334,7 @@ with tab4:  # 보고서 생성 탭
                 
                 # PDF 생성
                 pdf_buffer = io.BytesIO()
-                font_path = './NanumGothic-Bold.ttf'  # 업로드한 폰트 사용 (이름 맞춰주세요)
+                font_path = './NanumGothic-Bold.ttf'  # 업로드한 폰트 사용
                 pdfmetrics.registerFont(TTFont('NanumGothic', font_path))
                 doc = SimpleDocTemplate(pdf_buffer, pagesize=letter)
                 styles = getSampleStyleSheet()
