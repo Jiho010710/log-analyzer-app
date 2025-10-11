@@ -1,8 +1,9 @@
 import streamlit as st
 import pandas as pd
+import numpy as np  # Added for np.full_like in normalization
 from openai import OpenAI  # GPT 사용
 from elasticsearch import Elasticsearch
-from sklearn.neighbors import LocalOutlierFactor
+from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
@@ -325,7 +326,7 @@ if 'df' in st.session_state and st.button("LLM 요약 & PDF 생성 (ML 7점 이�
                     )
                     summary = response.choices[0].message.content
                     high_score_df.at[index, 'summary'] = summary
-        
+            
             # 원본 df 업데이트
             for idx in high_score_df.index:
                 st.session_state.df.at[idx, 'summary'] = high_score_df.at[idx, 'summary']
