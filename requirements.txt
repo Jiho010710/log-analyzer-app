@@ -1,9 +1,9 @@
 streamlit
+pandas
+numpy
 openai
 elasticsearch
-scikit-learn
-reportlab
-pandas
 evtx
 xmltodict
-torch
+altair
+reportlab
