@@ -5,7 +5,7 @@ from openai import OpenAI  # GPT 사용
 from elasticsearch import Elasticsearch, helpers
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
@@ -15,12 +15,9 @@ import warnings
 from evtx import PyEvtxParser
 import xmltodict
 from datetime import datetime, timedelta
-import altair as alt  # 대시보드 시각화 (plotly 대신 사용)
+import altair as alt  # 대시보드 시각화
 import requests  # 취약점 API 호출용
 import base64  # 이미지 인코딩
-import matplotlib.pyplot as plt  # 추가 플롯
-from wordcloud import WordCloud  # 워드클라우드
-import seaborn as sns  # 히트맵 등
 from streamlit_option_menu import option_menu  # 사이드바 메뉴
 import streamlit.components.v1 as components  # HTML 컴포넌트
 from PIL import Image as PILImage  # 이미지 처리
@@ -31,17 +28,14 @@ from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 import hashlib  # 사용자 인증용 해싱
 import time  # 실시간 업데이트 시뮬레이션
-import threading  # 백그라운드 스레드 (주의: Streamlit에서 제한적)
 import random  # 테스트 데이터 생성
 from collections import defaultdict  # 데이터 구조
-import networkx as nx  # 네트워크 그래프 ( torch 대신 사용 가능, 하지만 환경 확인)
 import zipfile  # 백업 압축
 import shutil  # 파일 복사
 import logging  # 로깅
 import sqlite3  # 로컬 DB for 사용자 관리
 from io import StringIO  # 문자열 IO
 import re  # 정규식 검색
-from sklearn.cluster import KMeans  # ML for anomaly (sklearn 없음? 환경에 없으면 제거, code_execution에 statsmodels 있지만 대체)
 # sklearn 없음, numpy로 간단 anomaly 구현
 
 warnings.filterwarnings("ignore")
@@ -334,16 +328,6 @@ def detect_anomalies(df):
         return anomalies
     return pd.Series()
 
-# 네트워크 그래프 함수 (matplotlib 사용)
-def display_network_graph(df):
-    if 'host.ip' in df.columns and 'winlog.user.name' in df.columns:
-        G = nx.Graph()
-        for _, row in df.iterrows():
-            G.add_edge(row['host.ip'], row['winlog.user.name'])
-        fig, ax = plt.subplots(figsize=(10, 8))
-        nx.draw(G, with_labels=True, ax=ax)
-        st.pyplot(fig)
-
 if selected == "대시보드":
     st.header("로그 대시보드 📊")
     if 'df' not in st.session_state or len(st.session_state.df) == 0:
@@ -438,28 +422,6 @@ if selected == "대시보드":
                     tooltip=['Process', 'Count']
                 )
                 st.altair_chart(process_chart)
-
-        # 워드클라우드
-        st.subheader("메시지 키워드 워드클라우드")
-        if 'message' in df.columns:
-            text = ' '.join(df['message'].dropna())
-            wordcloud = WordCloud(width=800, height=400, background_color='white' if theme == 'Light' else 'black', max_words=200).generate(text)
-            plt.figure(figsize=(10, 5))
-            plt.imshow(wordcloud, interpolation='bilinear')
-            plt.axis('off')
-            st.pyplot(plt)
-
-        # 히트맵
-        st.subheader("User vs Event Heatmap")
-        if 'winlog.user.name' in df.columns and 'winlog.event_id' in df.columns:
-            pivot = pd.pivot_table(df, values='@timestamp', index='winlog.user.name', columns='winlog.event_id', aggfunc='count', fill_value=0)
-            fig, ax = plt.subplots(figsize=(12, 8))
-            sns.heatmap(pivot, annot=False, cmap='YlGnBu', ax=ax)
-            st.pyplot(fig)
-
-        # 네트워크 그래프
-        st.subheader("네트워크 상호작용 그래프")
-        display_network_graph(df)
 
         # 메트릭 대시보드
         st.subheader("키 메트릭")
@@ -722,7 +684,7 @@ elif selected == "시스템 설정":
         st.stop()
     st.subheader("로그 보관 정책")
     retention_days = st.slider("보관 일수", 7, 365, 30)
-    if st.button("오래된 로그 삭제"):
+    if st.button("오래된 오래된 로그 삭제"):
         delete_query = {
             "query": {
                 "range": {
@@ -812,7 +774,14 @@ elif selected == "이상 탐지":
         anomalies = detect_anomalies(st.session_state.df)
         if not anomalies.empty:
             st.subheader("탐지된 이상")
-            st.line_chart(anomalies)
+            anomaly_df = anomalies.reset_index()
+            anomaly_df.columns = ['Time', 'Anomaly Score']
+            anomaly_chart = alt.Chart(anomaly_df).mark_line().encode(
+                x='Time:T',
+                y='Anomaly Score',
+                tooltip=['Time', 'Anomaly Score']
+            ).properties(title="이상 점수 추이").interactive()
+            st.altair_chart(anomaly_chart, use_container_width=True)
             st.dataframe(anomalies)
         else:
             st.info("이상 없음")
