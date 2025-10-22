@@ -18,6 +18,21 @@ from datetime import datetime, timedelta
 import altair as alt  # 대시보드 시각화 추가
 warnings.filterwarnings("ignore")
 
+# 커스텀 CSS로 Kibana/Wazuh 스타일 UI/UX 개선 (깔끔한 테마)
+st.markdown("""
+    <style>
+    .main {background-color: #f0f2f6;}
+    .stButton > button {background-color: #4CAF50; color: white; border-radius: 5px;}
+    .stExpander {border: 1px solid #ddd; border-radius: 5px;}
+    .stMetric {font-size: 1.2em; color: #333;}
+    .high-risk {color: red; font-weight: bold;}
+    .medium-risk {color: orange;}
+    .low-risk {color: green;}
+    </style>
+    """, unsafe_allow_html=True)
+
+st.set_page_config(layout="wide", page_title="SCP Shield", page_icon="🛡️")
+
 # GPT 설정 (API 키 secrets 사용)
 openai_client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
@@ -26,13 +41,16 @@ with st.sidebar.form(key="es_config_form"):
     st.title("ES 설정")
     es_host = st.text_input("ES 호스트", "http://3.38.65.230:9200")
     es_user = st.text_input("ES 사용자", "elastic")
-    es_pass = st.text_input("ES 비밀번호", type="password")  # 기본값 제거, type=password
+    es_pass = st.text_input("ES 비밀번호", type="password")
     submit_es = st.form_submit_button("ES 연결")
 
 if submit_es:
-    es = Elasticsearch(hosts=[es_host], basic_auth=(es_user, es_pass), request_timeout=120)  # 타임아웃 증가
-    st.session_state.es = es  # 세션에 ES 연결 저장
-    st.sidebar.success("ES 연결 완료!")
+    try:
+        es = Elasticsearch(hosts=[es_host], basic_auth=(es_user, es_pass), request_timeout=120)
+        st.session_state.es = es
+        st.sidebar.success("ES 연결 완료!")
+    except Exception as e:
+        st.sidebar.error(f"ES 연결 에러: {e}")
 
 # ES 연결 확인 (세션에서 불러옴)
 if 'es' not in st.session_state:
@@ -91,6 +109,21 @@ def display_paginated_df(df, page_size=30, key_prefix="main"):
     simplified_df = page_df[columns_to_show] if columns_to_show else page_df
     simplified_df['winlog.user.name'] = simplified_df.get('winlog.user.name', 'N/A')
     st.dataframe(simplified_df, use_container_width=True) # 더 넓게 표시
+
+# 로그 트리 구조 함수 (계층적 보기, event_id 그룹화)
+def display_log_tree(df):
+    if 'winlog.event_id' in df.columns:
+        grouped = df.groupby('winlog.event_id')
+        for event_id, group in grouped:
+            with st.expander(f"Event ID: {event_id} ({len(group)} logs)"):
+                for idx, row in group.iterrows():
+                    st.write(f" - Timestamp: {row.get('@timestamp', 'N/A')}")
+                    st.write(f"   Message: {row.get('message', 'N/A')}")
+                    st.write(f"   User: {row.get('winlog.user.name', 'N/A')}")
+                    st.write("---")
+    else:
+        st.info("트리 구조를 위한 Event ID 컬럼이 없습니다. 일반 테이블로 표시합니다.")
+        display_paginated_df(df)
 
 # 탭 구조 추가 (Kibana처럼: Dashboard, Logs, Reports)
 tab1, tab2, tab4 = st.tabs(["대시보드", "로그 조회", "보고서 생성"])
