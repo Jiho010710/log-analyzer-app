@@ -43,11 +43,10 @@ es = st.session_state.es
 # 앱 타이틀
 st.title("SCP Shield")
 
-# 사이드바에 추가 옵션 (있어보이게: 로그 검색 필터, 알림 임계값 등)
+# 사이드바에 추가 옵션 (있어보이게: 로그 검색 필터 등)
 with st.sidebar:
     st.title("추가 옵션")
     search_term = st.text_input("로그 검색 (메시지 내 키워드)", "")
-    alert_threshold = st.slider("알림 임계값 (ML 점수)", 5.0, 10.0, 7.0)  # 추가: 알림 기능 위한 임계값
     event_id_filter = st.text_input("Event ID 필터", "")  # 추가: Event ID 필터
 
 # 페이징 함수 (한 페이지 30개, key_prefix로 중복 키 방지)
@@ -209,7 +208,7 @@ with tab2: # 로그 조회 탭
 with tab4: # 보고서 생성 탭
     st.header("보고서 & 요약 생성")
     if 'df' in st.session_state and st.button("LLM 요약 & PDF 생성"):
-        high_score_df = st.session_state.df.copy()  # ML 제거로 전체 로그 요약
+        high_score_df = st.session_state.df.copy()  # 전체 로그 요약
         if len(high_score_df) == 0:
             st.warning("로그가 없습니다.")
         else:
