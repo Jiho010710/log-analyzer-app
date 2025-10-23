@@ -176,7 +176,9 @@ def display_paginated_df(df, page_size=50, key_prefix="main"):
     if '@timestamp' in df.columns:
         df['@timestamp'] = pd.to_datetime(df['@timestamp'], errors='coerce')
         start_date, end_date = time_range
-        df = df[(df['@timestamp'] >= pd.to_datetime(start_date)) & (df['@timestamp'] <= pd.to_datetime(end_date))]
+        start_date = pd.to_datetime(start_date, utc=True)
+        end_date = pd.to_datetime(end_date, utc=True)
+        df = df[(df['@timestamp'] >= start_date) & (df['@timestamp'] <= end_date)]
 
     level_column = 'new_level' if 'new_level' in df.columns else 'level'
     if severity_filter:
