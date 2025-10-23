@@ -224,22 +224,6 @@ def display_log_tree(df, group_by='winlog.event_id'):
     else:
         display_paginated_df(df)
 
-# 테스트 데이터 생성
-def generate_test_logs(num_logs=500):
-    logs = []
-    for i in range(num_logs):
-        log = {
-            '@timestamp': datetime.now() - timedelta(days=random.randint(0, 30)),
-            'message': f"Test log {i}: {random.choice(['alert', 'warning', 'info'])}",
-            'winlog.event_id': random.randint(1000, 9999),
-            'winlog.user.name': random.choice(['admin', 'user1', 'guest']),
-            'host.ip': f"192.168.{random.randint(0,255)}.{random.randint(0,255)}",
-            'level': random.choice(['low', 'medium', 'high', 'critical']),
-            'file.hash.sha256': random.choice(['ed01ebfbc9eb5bbea545af4d01bf5f1071661840480439c6e5babe8e080e41aa', 'd41d8cd98f00b204e9800998ecf8427e', None])  # 예시 해시
-        }
-        logs.append(log)
-    return pd.DataFrame(logs)
-
 # ES 로그 가져오기
 def fetch_logs_from_es(query_body, index=".internal.alerts-security.alerts*"):
     try:
@@ -284,9 +268,7 @@ def detect_anomalies(df):
 if selected == "대시보드":
     st.header("지능형 위협 대시보드")
     if 'df' not in st.session_state or len(st.session_state.df) == 0:
-        if st.button("테스트 데이터 로드", type="primary"):
-            st.session_state.df = generate_test_logs()
-            st.success("테스트 데이터 로드 완료!")
+        st.info("로그를 불러오세요.")
     if 'df' in st.session_state and len(st.session_state.df) > 0:
         df = st.session_state.df.copy()
 
@@ -349,7 +331,7 @@ if selected == "대시보드":
         metric_cols[3].metric("Unique IPs", df['host.ip'].nunique() if 'host.ip' in df else 0)
 
     else:
-        st.info("로그를 불러오거나 테스트 데이터를 로드하세요.")
+        st.info("로그를 불러오세요.")
 
 elif selected == "로그 조회":
     st.header("로그 조회 & 분석")
@@ -451,18 +433,33 @@ elif selected == "취약점 스캔 (VirusTotal 통합)":
                     except Exception as e:
                         st.error(f"스캔 에러: {str(e)}")
     else:
-        if 'df' in st.session_state and st.button("로그 기반 VT 스캔", type="primary"):
-            df = st.session_state.filtered_df if 'filtered_df' in st.session_state else st.session_state.df
+        if st.button("로그 기반 VT 스캔", type="primary"):
+            query = {
+                "query": {"match_all": {}},
+                "size": 1000,
+                "sort": [{"@timestamp": {"order": "desc"}}]
+            }
+            df = fetch_logs_from_es(query)
+            if not df.empty:
+                df['level'] = df.get('kibana.alert.severity', 'low').str.lower()
+                st.session_state.df = df
+                st.session_state.filtered_df = df.copy()
+            else:
+                st.warning("로그 없음.")
+                st.stop()
             # medium, high 수준 로그 필터
             risk_levels = ['medium', 'high', 'critical']
             risk_df = df[df['level'].isin(risk_levels)]
             high_score_logs = []
             with st.spinner("VirusTotal 스캔 중... (악성 점수 > 5)"):
                 for _, row in risk_df.iterrows():
-                    if 'file.hash.sha256' in row and row['file.hash.sha256']:
-                        malicious, data = scan_hash_with_vt(row['file.hash.sha256'])
-                        if malicious > 5:
-                            high_score_logs.append({'log': row['message'], 'level': row['level'], 'hash': row['file.hash.sha256'], 'malicious_score': malicious, 'vt_data': data})
+                    if 'winlog.event_data.Hashes' in row and row['winlog.event_data.Hashes']:
+                        # 실제 ES 필드에 맞게 'winlog.event_data.Hashes' 가정, 필요시 변경
+                        hash_value = row['winlog.event_data.Hashes'].split('SHA256=')[1] if 'SHA256=' in row['winlog.event_data.Hashes'] else None
+                        if hash_value:
+                            malicious, data = scan_hash_with_vt(hash_value)
+                            if malicious > 5:
+                                high_score_logs.append({'log': row['message'], 'level': row['level'], 'hash': hash_value, 'malicious_score': malicious, 'vt_data': data})
 
             if high_score_logs:
                 high_df = pd.DataFrame(high_score_logs)
