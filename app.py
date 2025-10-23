@@ -453,27 +453,30 @@ elif selected == "취약점 스캔 (VirusTotal 통합)":
     else:
         if 'df' in st.session_state and st.button("로그 기반 VT 스캔", type="primary"):
             df = st.session_state.filtered_df if 'filtered_df' in st.session_state else st.session_state.df
+            # medium, high 수준 로그 필터
+            risk_levels = ['medium', 'high', 'critical']
+            risk_df = df[df['level'].isin(risk_levels)]
             high_score_logs = []
             with st.spinner("VirusTotal 스캔 중... (악성 점수 > 5)"):
-                for _, row in df.iterrows():
+                for _, row in risk_df.iterrows():
                     if 'file.hash.sha256' in row and row['file.hash.sha256']:
                         malicious, data = scan_hash_with_vt(row['file.hash.sha256'])
                         if malicious > 5:
-                            high_score_logs.append({'log': row['message'], 'hash': row['file.hash.sha256'], 'malicious_score': malicious, 'vt_data': data})
+                            high_score_logs.append({'log': row['message'], 'level': row['level'], 'hash': row['file.hash.sha256'], 'malicious_score': malicious, 'vt_data': data})
 
             if high_score_logs:
                 high_df = pd.DataFrame(high_score_logs)
-                st.subheader("고위험 로그 (악성 점수 > 5)")
-                st.dataframe(high_df[['log', 'hash', 'malicious_score']])
+                st.subheader("고위험 로그 (악성 점수 > 5, medium/high 수준)")
+                st.dataframe(high_df[['log', 'level', 'hash', 'malicious_score']])
 
-                if st.button("LLM 취약점 보고서 생성", type="primary"):
+                if st.button("LLM 취약점 분석 보고서 생성", type="primary"):
                     with st.spinner("LLM 보고서 생성 중..."):
                         reports = []
                         for item in high_score_logs:
-                            prompt = f"이 로그와 VirusTotal 데이터로 취약점 보고서 작성: 로그 - {item['log']}, VT 데이터 - {json.dumps(item['vt_data'])}"
+                            prompt = f"이 로그와 VirusTotal 데이터를 기반으로 취약점 분석 보고서 작성: 로그 - {item['log']}, 레벨 - {item['level']}, VT 데이터 - {json.dumps(item['vt_data'])}. 잠재적 위협, 취약점 상세, 대응 방안 포함."
                             response = openai_client.chat.completions.create(model="gpt-4o", messages=[{"role": "user", "content": prompt}])
                             reports.append(response.choices[0].message.content)
-                        st.subheader("취약점 보고서")
+                        st.subheader("취약점 분석 보고서")
                         for report in reports:
                             st.markdown(report)
                             st.markdown("---")
@@ -482,17 +485,69 @@ elif selected == "취약점 스캔 (VirusTotal 통합)":
 
 elif selected == "보고서 생성":
     st.header("분석 보고서 생성")
-    # 유사한 보고서 생성 로직, VT 통합 추가 가능
+    # 기존 보고서 생성 로직, VT 데이터 포함 가능
+    if 'df' in st.session_state and st.button("보고서 생성", type="primary"):
+        df = st.session_state.df.copy()
+        if len(df) == 0:
+            st.warning("로그 없음")
+        else:
+            with st.spinner("생성 중..."):
+                for index, row in df.iterrows():
+                    level = row.get('level', 'low')
+                    log_text = row.get('message', str(row))
+                    vulns = "N/A"
+                    if 'process.name' in row:
+                        try:
+                            resp = requests.get(f"https://services.nvd.nist.gov/rest/json/cves/1.0?keyword={row['process.name']}", timeout=10)
+                            if resp.status_code == 200:
+                                data = resp.json()
+                                if data['totalResults'] > 0:
+                                    vulns = f"{data['totalResults']} vulns found, e.g., {data['result']['CVE_Items'][0]['cve']['CVE_data_meta']['ID']}"
+                        except:
+                            pass
+                    df.at[index, 'vulns'] = vulns
+                    prompt = f"로그 요약, 위협 분석, 대응: {log_text}. 취약점: {vulns}. 레벨: {level}"
+                    response = openai_client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[{"role": "user", "content": prompt}]
+                    )
+                    df.at[index, 'summary'] = response.choices[0].message.content
 
-    # (기존 보고서 생성 코드 유지, 생략)
+                st.session_state.df = df
+                st.success("요약 완료!")
 
-elif selected == "알림 설정":
-    st.header("알림 & 알ERT 설정")
-    # (기존 코드 유지, 생략)
+            pdf_buffer = io.BytesIO()
+            doc = SimpleDocTemplate(pdf_buffer, pagesize=letter)
+            styles = getSampleStyleSheet()
+            body_style = ParagraphStyle('Body', fontName='NanumGothic', fontSize=10, wordWrap='CJK')
+            elements = [Paragraph("로그 분석 보고서", styles['Title'])]
+            data = [['로그 ID', '메시지 (짧게)', '레벨', '요약']]
+            for index, row in df.iterrows():
+                msg_short = Paragraph(row.get('message', 'N/A')[:50] + '...', body_style)
+                level_score = Paragraph(f"{row.get('new_level', row.get('level'))}", body_style)
+                summary_para = Paragraph(row['summary'], body_style)
+                data.append([Paragraph(str(index), body_style), msg_short, level_score, summary_para])
+            col_widths = [50, 150, 100, 300]
+            table = Table(data, colWidths=col_widths)
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, -1), 'NanumGothic'),
+                ('FONTSIZE', (0, 0), (-1, 0), 14),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+            ]))
+            elements.append(table)
+            doc.build(elements)
+            pdf_buffer.seek(0)
+            st.download_button("PDF 다운로드", pdf_buffer, file_name="report.pdf", mime="application/pdf")
 
-# 다른 섹션도 유사하게 세련되게 업그레이드, 전체 코드 1000줄 목표로 기능 확장
-# ... (나머지 섹션 코드 추가, 기존 기반으로 확장)
-
+# 다른 섹션 생략, 필요시 추가
 # 푸터
 st.markdown("---")
 st.markdown("SCP Shield Pro | AI-Driven Security Intelligence | © 2025 xAI")
