@@ -18,7 +18,6 @@ from datetime import datetime, timedelta
 import altair as alt  # 대시보드 시각화
 import requests  # 취약점 API 호출용
 import base64  # 이미지 인코딩
-from streamlit_option_menu import option_menu  # 사이드바 메뉴
 import streamlit.components.v1 as components  # HTML 컴포넌트
 from PIL import Image as PILImage  # 이미지 처리
 import os  # 파일 관리
@@ -187,15 +186,9 @@ es = st.session_state.es
 # 앱 타이틀 with 아이콘
 st.title("SCP Shield 🛡️ - Advanced Threat Detection Engine")
 
-# 사이드바 메뉴 (option_menu 사용으로 Wazuh-like 네비게이션)
-with st.sidebar:
-    selected = option_menu(
-        menu_title="메인 메뉴",
-        options=["대시보드", "로그 조회", "보고서 생성", "취약점 스캔", "알림 설정", "시스템 설정", "사용자 관리", "실시간 모니터링", "이상 탐지", "데이터 백업"],
-        icons=["speedometer2", "search", "file-earmark-text", "bug", "bell", "gear", "people", "activity", "alert-triangle", "archive"],
-        menu_icon="cast",
-        default_index=0,
-    )
+# 사이드바 메뉴 (native selectbox 사용)
+menu_options = ["대시보드", "로그 조회", "보고서 생성", "취약점 스캔", "알림 설정", "시스템 설정", "사용자 관리", "실시간 모니터링", "이상 탐지", "데이터 백업"]
+selected = st.sidebar.selectbox("메인 메뉴", menu_options)
 
 # 추가 옵션 (공통 사이드바 아래)
 with st.sidebar:
@@ -684,7 +677,7 @@ elif selected == "시스템 설정":
         st.stop()
     st.subheader("로그 보관 정책")
     retention_days = st.slider("보관 일수", 7, 365, 30)
-    if st.button("오래된 오래된 로그 삭제"):
+    if st.button("오래된 로그 삭제"):
         delete_query = {
             "query": {
                 "range": {
