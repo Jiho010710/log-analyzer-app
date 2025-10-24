@@ -3,6 +3,8 @@ import pandas as pd
 import numpy as np
 from openai import OpenAI  # GPT 사용
 from elasticsearch import Elasticsearch
+from sklearn.ensemble import IsolationForest
+from sklearn.preprocessing import StandardScaler
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
@@ -59,13 +61,16 @@ if 'es' not in st.session_state:
 es = st.session_state.es
 
 # 앱 타이틀
-st.title("SCP Shield")
+st.title("SCP Shield 🛡️")
 
-# 사이드바에 추가 옵션 (있어보이게: 로그 검색 필터 등)
+# 사이드바에 추가 옵션 (있어보이게: 로그 검색 필터, 알림 임계값 등)
 with st.sidebar:
     st.title("추가 옵션")
     search_term = st.text_input("로그 검색 (메시지 내 키워드)", "")
+    min_ml_score = st.slider("최소 ML 점수 필터", 0.0, 10.0, 0.0)
+    alert_threshold = st.slider("알림 임계값 (ML 점수)", 5.0, 10.0, 7.0)  # 추가: 알림 기능 위한 임계값
     event_id_filter = st.text_input("Event ID 필터", "")  # 추가: Event ID 필터
+    vt_api_key = st.text_input("VirusTotal API 키", type="password")  # VirusTotal API 키 입력 추가
 
 # 페이징 함수 (한 페이지 30개, key_prefix로 중복 키 방지)
 def display_paginated_df(df, page_size=30, key_prefix="main"):
@@ -79,6 +84,8 @@ def display_paginated_df(df, page_size=30, key_prefix="main"):
     # 추가 필터 적용 (사이드바 검색)
     if search_term and 'message' in df.columns:
         df = df[df['message'].str.contains(search_term, case=False, na=False)]
+    if 'ml_score' in df.columns:
+        df = df[df['ml_score'] >= min_ml_score]
     
     # 페이징 컨트롤
     total_pages = (len(df) - 1) // page_size + 1
@@ -104,29 +111,15 @@ def display_paginated_df(df, page_size=30, key_prefix="main"):
     if '@timestamp' in page_df.columns: columns_to_show.append('@timestamp') # 타임스탬프 추가
     if 'message' in page_df.columns: columns_to_show.append('message')
     if 'winlog.user.name' in page_df.columns: columns_to_show.append('winlog.user.name')
+    if 'ml_score' in page_df.columns: columns_to_show.append('ml_score')
     if 'summary' in page_df.columns: columns_to_show.append('summary')
     
     simplified_df = page_df[columns_to_show] if columns_to_show else page_df
     simplified_df['winlog.user.name'] = simplified_df.get('winlog.user.name', 'N/A')
     st.dataframe(simplified_df, use_container_width=True) # 더 넓게 표시
 
-# 로그 트리 구조 함수 (계층적 보기, event_id 그룹화)
-def display_log_tree(df):
-    if 'winlog.event_id' in df.columns:
-        grouped = df.groupby('winlog.event_id')
-        for event_id, group in grouped:
-            with st.expander(f"Event ID: {event_id} ({len(group)} logs)"):
-                for idx, row in group.iterrows():
-                    st.write(f" - Timestamp: {row.get('@timestamp', 'N/A')}")
-                    st.write(f"   Message: {row.get('message', 'N/A')}")
-                    st.write(f"   User: {row.get('winlog.user.name', 'N/A')}")
-                    st.write("---")
-    else:
-        st.info("트리 구조를 위한 Event ID 컬럼이 없습니다. 일반 테이블로 표시합니다.")
-        display_paginated_df(df)
-
-# 탭 구조 추가 (Kibana처럼: Dashboard, Logs, Reports)
-tab1, tab2, tab4 = st.tabs(["대시보드", "로그 조회", "보고서 생성"])
+# 탭 구조 추가 (Kibana처럼: Dashboard, Logs, Analysis, Reports)
+tab1, tab2, tab3, tab4 = st.tabs(["대시보드", "로그 조회", "분석", "보고서 생성"])
 
 with tab1: # 대시보드 탭 (Wazuh/Kibana 스타일 시각화 추가)
     st.header("로그 대시보드")
@@ -167,6 +160,11 @@ with tab1: # 대시보드 탭 (Wazuh/Kibana 스타일 시각화 추가)
             top_events.columns = ['Event ID', 'Count']
             st.subheader("Top 5 Events")
             st.table(top_events)
+        
+        # 알림 위젯 (High ML 점수 로그 수)
+        if 'ml_score' in df.columns:
+            high_alerts = len(df[df['ml_score'] > alert_threshold])
+            st.metric("High Risk Alerts", high_alerts, delta_color="inverse")
 
 with tab2: # 로그 조회 탭
     st.header("로그 조회")
