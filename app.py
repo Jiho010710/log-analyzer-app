@@ -18,6 +18,23 @@ from datetime import datetime, timedelta
 import altair as alt  # 대시보드 시각화 추가
 warnings.filterwarnings("ignore")
 
+# 커스텀 CSS로 Kibana/Wazuh 스타일 UI/UX 개선 (깔끔한 테마, 다크 모드)
+st.markdown("""
+    <style>
+    .main {background-color: #1e1e1e; color: #ffffff;}
+    .stButton > button {background-color: #4CAF50; color: white; border-radius: 5px;}
+    .stExpander {border: 1px solid #333; border-radius: 5px; background-color: #2a2a2a;}
+    .stMetric {font-size: 1.2em; color: #ffffff;}
+    .high-risk {color: #ff4b4b; font-weight: bold;}
+    .medium-risk {color: #ffb74d;}
+    .low-risk {color: #81c784;}
+    .stSidebar {background-color: #121212;}
+    .stDataFrame {background-color: #2a2a2a; color: #ffffff;}
+    </style>
+    """, unsafe_allow_html=True)
+
+st.set_page_config(layout="wide", page_title="SCP Shield", page_icon="🛡️")
+
 # GPT 설정 (API 키 secrets 사용)
 openai_client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
@@ -26,13 +43,16 @@ with st.sidebar.form(key="es_config_form"):
     st.title("ES 설정")
     es_host = st.text_input("ES 호스트", "http://3.38.65.230:9200")
     es_user = st.text_input("ES 사용자", "elastic")
-    es_pass = st.text_input("ES 비밀번호", type="password")  # 기본값 제거, type=password
+    es_pass = st.text_input("ES 비밀번호", type="password")
     submit_es = st.form_submit_button("ES 연결")
 
 if submit_es:
-    es = Elasticsearch(hosts=[es_host], basic_auth=(es_user, es_pass), request_timeout=120)  # 타임아웃 증가
-    st.session_state.es = es  # 세션에 ES 연결 저장
-    st.sidebar.success("ES 연결 완료!")
+    try:
+        es = Elasticsearch(hosts=[es_host], basic_auth=(es_user, es_pass), request_timeout=120)
+        st.session_state.es = es
+        st.sidebar.success("ES 연결 완료!")
+    except Exception as e:
+        st.sidebar.error(f"ES 연결 에러: {e}")
 
 # ES 연결 확인 (세션에서 불러옴)
 if 'es' not in st.session_state:
@@ -41,7 +61,7 @@ if 'es' not in st.session_state:
 es = st.session_state.es
 
 # 앱 타이틀
-st.title("SCP Shield")
+st.title("SCP Shield 🛡️")
 
 # 사이드바에 추가 옵션 (있어보이게: 로그 검색 필터 등)
 with st.sidebar:
@@ -92,6 +112,23 @@ def display_paginated_df(df, page_size=30, key_prefix="main"):
     simplified_df['winlog.user.name'] = simplified_df.get('winlog.user.name', 'N/A')
     st.dataframe(simplified_df, use_container_width=True) # 더 넓게 표시
 
+# 로그 트리 구조 함수 (계층적 보기, event_id 그룹화)
+def display_log_tree(df):
+    if 'winlog.event_id' in df.columns:
+        grouped = df.groupby('winlog.event_id')
+        for event_id, group in grouped:
+            with st.expander(f"🗂 Event ID: {event_id} ({len(group)} logs)"):
+                for idx, row in group.iterrows():
+                    level = row.get('level', 'N/A')
+                    level_class = 'high-risk' if level == 'high' else 'medium-risk' if level == 'medium' else 'low-risk'
+                    st.markdown(f"<div class='{level_class}'>- Timestamp: {row.get('@timestamp', 'N/A')}</div>", unsafe_allow_html=True)
+                    st.markdown(f"  Message: {row.get('message', 'N/A')}")
+                    st.markdown(f"  User: {row.get('winlog.user.name', 'N/A')}")
+                    st.markdown("---")
+    else:
+        st.info("트리 구조를 위한 Event ID 컬럼이 없습니다. 일반 테이블로 표시합니다.")
+        display_paginated_df(df)
+
 # 탭 구조 추가 (Kibana처럼: Dashboard, Logs, Reports)
 tab1, tab2, tab4 = st.tabs(["대시보드", "로그 조회", "보고서 생성"])
 
@@ -123,17 +160,20 @@ with tab1: # 대시보드 탭 (Wazuh/Kibana 스타일 시각화 추가)
         st.altair_chart(pie_chart, use_container_width=True)
         
         # Top 5 Users/Events (표 형식)
-        if 'winlog.user.name' in df.columns:
-            top_users = df['winlog.user.name'].value_counts().head(5).reset_index()
-            top_users.columns = ['User', 'Count']
-            st.subheader("Top 5 Users")
-            st.table(top_users)
+        col_users, col_events = st.columns(2)
+        with col_users:
+            if 'winlog.user.name' in df.columns:
+                top_users = df['winlog.user.name'].value_counts().head(5).reset_index()
+                top_users.columns = ['User', 'Count']
+                st.subheader("Top 5 Users")
+                st.table(top_users)
         
-        if 'winlog.event_id' in df.columns:
-            top_events = df['winlog.event_id'].value_counts().head(5).reset_index()
-            top_events.columns = ['Event ID', 'Count']
-            st.subheader("Top 5 Events")
-            st.table(top_events)
+        with col_events:
+            if 'winlog.event_id' in df.columns:
+                top_events = df['winlog.event_id'].value_counts().head(5).reset_index()
+                top_events.columns = ['Event ID', 'Count']
+                st.subheader("Top 5 Events")
+                st.table(top_events)
 
 with tab2: # 로그 조회 탭
     st.header("로그 조회")
