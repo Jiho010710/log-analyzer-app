@@ -18,18 +18,16 @@ from datetime import datetime, timedelta
 import altair as alt  # 대시보드 시각화 추가
 warnings.filterwarnings("ignore")
 
-# 커스텀 CSS로 Kibana/Wazuh 스타일 UI/UX 개선 (깔끔한 테마, 다크 모드)
+# 커스텀 CSS로 Kibana/Wazuh 스타일 UI/UX 개선 (깔끔한 테마)
 st.markdown("""
     <style>
-    .main {background-color: #1e1e1e; color: #ffffff;}
+    .main {background-color: #f0f2f6;}
     .stButton > button {background-color: #4CAF50; color: white; border-radius: 5px;}
-    .stExpander {border: 1px solid #333; border-radius: 5px; background-color: #2a2a2a;}
-    .stMetric {font-size: 1.2em; color: #ffffff;}
-    .high-risk {color: #ff4b4b; font-weight: bold;}
-    .medium-risk {color: #ffb74d;}
-    .low-risk {color: #81c784;}
-    .stSidebar {background-color: #121212;}
-    .stDataFrame {background-color: #2a2a2a; color: #ffffff;}
+    .stExpander {border: 1px solid #ddd; border-radius: 5px;}
+    .stMetric {font-size: 1.2em; color: #333;}
+    .high-risk {color: red; font-weight: bold;}
+    .medium-risk {color: orange;}
+    .low-risk {color: green;}
     </style>
     """, unsafe_allow_html=True)
 
@@ -61,7 +59,7 @@ if 'es' not in st.session_state:
 es = st.session_state.es
 
 # 앱 타이틀
-st.title("SCP Shield 🛡️")
+st.title("SCP Shield")
 
 # 사이드바에 추가 옵션 (있어보이게: 로그 검색 필터 등)
 with st.sidebar:
@@ -117,14 +115,12 @@ def display_log_tree(df):
     if 'winlog.event_id' in df.columns:
         grouped = df.groupby('winlog.event_id')
         for event_id, group in grouped:
-            with st.expander(f"🗂 Event ID: {event_id} ({len(group)} logs)"):
+            with st.expander(f"Event ID: {event_id} ({len(group)} logs)"):
                 for idx, row in group.iterrows():
-                    level = row.get('level', 'N/A')
-                    level_class = 'high-risk' if level == 'high' else 'medium-risk' if level == 'medium' else 'low-risk'
-                    st.markdown(f"<div class='{level_class}'>- Timestamp: {row.get('@timestamp', 'N/A')}</div>", unsafe_allow_html=True)
-                    st.markdown(f"  Message: {row.get('message', 'N/A')}")
-                    st.markdown(f"  User: {row.get('winlog.user.name', 'N/A')}")
-                    st.markdown("---")
+                    st.write(f" - Timestamp: {row.get('@timestamp', 'N/A')}")
+                    st.write(f"   Message: {row.get('message', 'N/A')}")
+                    st.write(f"   User: {row.get('winlog.user.name', 'N/A')}")
+                    st.write("---")
     else:
         st.info("트리 구조를 위한 Event ID 컬럼이 없습니다. 일반 테이블로 표시합니다.")
         display_paginated_df(df)
@@ -160,20 +156,17 @@ with tab1: # 대시보드 탭 (Wazuh/Kibana 스타일 시각화 추가)
         st.altair_chart(pie_chart, use_container_width=True)
         
         # Top 5 Users/Events (표 형식)
-        col_users, col_events = st.columns(2)
-        with col_users:
-            if 'winlog.user.name' in df.columns:
-                top_users = df['winlog.user.name'].value_counts().head(5).reset_index()
-                top_users.columns = ['User', 'Count']
-                st.subheader("Top 5 Users")
-                st.table(top_users)
+        if 'winlog.user.name' in df.columns:
+            top_users = df['winlog.user.name'].value_counts().head(5).reset_index()
+            top_users.columns = ['User', 'Count']
+            st.subheader("Top 5 Users")
+            st.table(top_users)
         
-        with col_events:
-            if 'winlog.event_id' in df.columns:
-                top_events = df['winlog.event_id'].value_counts().head(5).reset_index()
-                top_events.columns = ['Event ID', 'Count']
-                st.subheader("Top 5 Events")
-                st.table(top_events)
+        if 'winlog.event_id' in df.columns:
+            top_events = df['winlog.event_id'].value_counts().head(5).reset_index()
+            top_events.columns = ['Event ID', 'Count']
+            st.subheader("Top 5 Events")
+            st.table(top_events)
 
 with tab2: # 로그 조회 탭
     st.header("로그 조회")
