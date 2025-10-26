@@ -16,22 +16,34 @@ from evtx import PyEvtxParser
 import xmltodict
 from datetime import datetime, timedelta
 import altair as alt  # 대시보드 시각화 추가
+import requests  # VirusTotal API 호출을 위해 추가
+import time  # API 호출 지연을 위해 추가
 warnings.filterwarnings("ignore")
 
-# 커스텀 CSS로 Kibana/Wazuh 스타일 UI/UX 개선 (깔끔한 테마)
+# VirusTotal API 키 (제공된 키 사용)
+VIRUSTOTAL_API_KEY = "45848f3c007559530ef8923c7b6d819d2d240a87f472e8ad3edb57051210b9ee"
+
+# 커스텀 CSS로 Kibana/Wazuh 스타일 UI/UX 개선 (깔끔한 테마, 더 세련되게 업그레이드)
 st.markdown("""
     <style>
     .main {background-color: #f0f2f6;}
-    .stButton > button {background-color: #4CAF50; color: white; border-radius: 5px;}
-    .stExpander {border: 1px solid #ddd; border-radius: 5px;}
+    .stButton > button {background-color: #4CAF50; color: white; border-radius: 5px; padding: 8px 16px;}
+    .stExpander {border: 1px solid #ddd; border-radius: 5px; background-color: white;}
     .stMetric {font-size: 1.2em; color: #333;}
     .high-risk {color: red; font-weight: bold;}
     .medium-risk {color: orange;}
     .low-risk {color: green;}
+    .stDataFrame {border: 1px solid #ddd; border-radius: 5px; overflow: hidden;}
+    .stAlert {border-radius: 5px;}
+    /* 테이블 헤더 스타일 */
+    thead tr th {background-color: #e0e0e0; text-align: left; padding: 10px;}
+    tbody tr td {padding: 10px; border-bottom: 1px solid #ddd;}
+    /* 검색 바 스타일 */
+    .stTextInput > div > div > input {border-radius: 5px; padding: 8px;}
     </style>
     """, unsafe_allow_html=True)
 
-st.set_page_config(layout="wide", page_title="SCP Shield", page_icon="🛡️")
+st.set_page_config(layout="wide", page_title="SCP Shield - Advanced Detection Engine", page_icon="🛡️")
 
 # GPT 설정 (API 키 secrets 사용)
 openai_client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
@@ -59,28 +71,53 @@ if 'es' not in st.session_state:
 es = st.session_state.es
 
 # 앱 타이틀
-st.title("SCP Shield")
+st.title("SCP Shield - Advanced Detection Engine")
 
-# 사이드바에 추가 옵션 (있어보이게: 로그 검색 필터 등)
+# 사이드바에 추가 옵션 (있어보이게: 로그 검색 필터 등, 업그레이드: 더 많은 필터 추가)
 with st.sidebar:
     st.title("추가 옵션")
     search_term = st.text_input("로그 검색 (메시지 내 키워드)", "")
-    event_id_filter = st.text_input("Event ID 필터", "")  # 추가: Event ID 필터
+    event_id_filter = st.text_input("Event ID 필터", "")
+    user_filter = st.text_input("User 필터", "")  # 추가: 사용자 필터
+    time_range = st.date_input("시간 범위", (datetime.now() - timedelta(days=7), datetime.now()))  # 추가: 시간 범위 필터
+    vt_threshold = st.slider("VirusTotal 악성 점수 임계값", 0, 100, 20)  # 추가: VT 점수 임계값 설정
 
-# 페이징 함수 (한 페이지 30개, key_prefix로 중복 키 방지)
-def display_paginated_df(df, page_size=30, key_prefix="main"):
+# 페이징 함수 (한 페이지 50개로 업그레이드, 검색/필터 통합, 정렬 기능 추가)
+def display_paginated_df(df, page_size=50, key_prefix="main"):
     if f'page_{key_prefix}' not in st.session_state:
         st.session_state[f'page_{key_prefix}'] = 0
-    
+    if f'sort_col_{key_prefix}' not in st.session_state:
+        st.session_state[f'sort_col_{key_prefix}'] = '@timestamp' if '@timestamp' in df.columns else None
+    if f'sort_asc_{key_prefix}' not in st.session_state:
+        st.session_state[f'sort_asc_{key_prefix}'] = False  # 내림차순 기본
+
     if len(df) == 0:
         st.info("표시할 로그가 없습니다.")
         return
-    
-    # 추가 필터 적용 (사이드바 검색)
+
+    # 추가 필터 적용 (사이드바 검색 + 필터 업그레이드)
     if search_term and 'message' in df.columns:
         df = df[df['message'].str.contains(search_term, case=False, na=False)]
-    
-    # 페이징 컨트롤
+    if event_id_filter and 'winlog.event_id' in df.columns:
+        df = df[df['winlog.event_id'].astype(str).str.contains(event_id_filter)]
+    if user_filter and 'winlog.user.name' in df.columns:
+        df = df[df['winlog.user.name'].str.contains(user_filter, case=False, na=False)]
+    if '@timestamp' in df.columns:
+        df['@timestamp'] = pd.to_datetime(df['@timestamp'], errors='coerce')
+        start_date, end_date = time_range
+        df = df[(df['@timestamp'] >= pd.to_datetime(start_date)) & (df['@timestamp'] <= pd.to_datetime(end_date))]
+
+    # 정렬 컬럼 선택 (드롭다운으로 업그레이드)
+    sort_options = [col for col in df.columns if col in ['@timestamp', 'level', 'new_level', 'winlog.event_id', 'winlog.user.name']]
+    sort_col = st.selectbox("정렬 기준", sort_options, index=sort_options.index(st.session_state[f'sort_col_{key_prefix}']) if st.session_state[f'sort_col_{key_prefix}'] in sort_options else 0, key=f'sort_select_{key_prefix}')
+    sort_asc = st.checkbox("오름차순 정렬", value=st.session_state[f'sort_asc_{key_prefix}'], key=f'sort_asc_{key_prefix}')
+    st.session_state[f'sort_col_{key_prefix}'] = sort_col
+    st.session_state[f'sort_asc_{key_prefix}'] = sort_asc
+
+    if sort_col:
+        df = df.sort_values(by=sort_col, ascending=sort_asc)
+
+    # 페이징 컨트롤 (더 세련되게: 슬라이더 추가)
     total_pages = (len(df) - 1) // page_size + 1
     col1, col2, col3 = st.columns([1, 3, 1])
     with col1:
@@ -90,50 +127,82 @@ def display_paginated_df(df, page_size=30, key_prefix="main"):
         if st.button("다음 페이지", key=f"next_page_{key_prefix}") and st.session_state[f'page_{key_prefix}'] < total_pages - 1:
             st.session_state[f'page_{key_prefix}'] += 1
     with col2:
-        st.write(f"페이지 {st.session_state[f'page_{key_prefix}'] + 1} / {total_pages}")
-    
+        st.session_state[f'page_{key_prefix}'] = st.slider("페이지 선택", 1, total_pages, st.session_state[f'page_{key_prefix}'] + 1, key=f"page_slider_{key_prefix}") - 1
+
     # 현재 페이지 데이터
     start = st.session_state[f'page_{key_prefix}'] * page_size
     end = start + page_size
     page_df = df.iloc[start:end]
-    
-    # 표시 컬럼 선택 (더 있어보이게: 추가 컬럼)
+
+    # 표시 컬럼 선택 (업그레이드: VT 점수, 요약 등 추가)
     columns_to_show = []
     if 'level' in page_df.columns: columns_to_show.append('level')
     if 'new_level' in page_df.columns: columns_to_show.append('new_level')
-    if '@timestamp' in page_df.columns: columns_to_show.append('@timestamp') # 타임스탬프 추가
+    if '@timestamp' in page_df.columns: columns_to_show.append('@timestamp')
     if 'message' in page_df.columns: columns_to_show.append('message')
     if 'winlog.user.name' in page_df.columns: columns_to_show.append('winlog.user.name')
+    if 'winlog.event_id' in page_df.columns: columns_to_show.append('winlog.event_id')
+    if 'vt_score' in page_df.columns: columns_to_show.append('vt_score')  # 추가: VT 점수
     if 'summary' in page_df.columns: columns_to_show.append('summary')
-    
+
     simplified_df = page_df[columns_to_show] if columns_to_show else page_df
     simplified_df['winlog.user.name'] = simplified_df.get('winlog.user.name', 'N/A')
-    st.dataframe(simplified_df, use_container_width=True) # 더 넓게 표시
+    
+    # 레벨에 따라 색상 적용 (DataFrame 스타일링 업그레이드)
+    def color_levels(val):
+        if val == 'high': return 'color: red; font-weight: bold'
+        elif val == 'medium': return 'color: orange'
+        elif val == 'low': return 'color: green'
+        return ''
+    
+    level_col = 'new_level' if 'new_level' in simplified_df.columns else 'level'
+    styled_df = simplified_df.style.applymap(color_levels, subset=[level_col])
+    st.dataframe(styled_df, use_container_width=True)  # 더 넓게 표시
 
-# 로그 트리 구조 함수 (계층적 보기, event_id 그룹화)
+# 로그 트리 구조 함수 (업그레이드: 계층적 보기, event_id 그룹화 + 검색 통합)
 def display_log_tree(df):
     if 'winlog.event_id' in df.columns:
         grouped = df.groupby('winlog.event_id')
         for event_id, group in grouped:
-            with st.expander(f"Event ID: {event_id} ({len(group)} logs)"):
-                for idx, row in group.iterrows():
-                    st.write(f" - Timestamp: {row.get('@timestamp', 'N/A')}")
-                    st.write(f"   Message: {row.get('message', 'N/A')}")
-                    st.write(f"   User: {row.get('winlog.user.name', 'N/A')}")
-                    st.write("---")
+            with st.expander(f"Event ID: {event_id} ({len(group)} logs)", expanded=False):
+                display_paginated_df(group, page_size=10, key_prefix=f"tree_{event_id}")  # 페이징 통합
     else:
         st.info("트리 구조를 위한 Event ID 컬럼이 없습니다. 일반 테이블로 표시합니다.")
         display_paginated_df(df)
 
-# 탭 구조 추가 (Kibana처럼: Dashboard, Logs, Reports)
-tab1, tab2, tab4 = st.tabs(["대시보드", "로그 조회", "보고서 생성"])
+# VirusTotal API 호출 함수 (해시 추출 및 점수 확인, 업그레이드: 캐싱 추가)
+@st.cache_data(ttl=3600)  # 1시간 캐싱으로 API 호출 최소화
+def get_virustotal_score(hash_value):
+    if not hash_value:
+        return 0
+    url = f"https://www.virustotal.com/api/v3/files/{hash_value}"
+    headers = {"x-apikey": VIRUSTOTAL_API_KEY}
+    try:
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            data = response.json()
+            positives = data['data']['attributes']['last_analysis_stats']['malicious']
+            total = data['data']['attributes']['last_analysis_stats']['malicious'] + data['data']['attributes']['last_analysis_stats']['undetected']
+            score = (positives / total) * 100 if total > 0 else 0
+            return score
+        elif response.status_code == 404:
+            return 0  # 파일 없음
+        else:
+            st.warning(f"VirusTotal API 에러: {response.status_code}")
+            return 0
+    except Exception as e:
+        st.error(f"VirusTotal 호출 에러: {e}")
+        return 0
 
-with tab1: # 대시보드 탭 (Wazuh/Kibana 스타일 시각화 추가)
+# 탭 구조 추가 (업그레이드: Dashboard, Logs, VT Scan, Reports, Alerts)
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["대시보드", "로그 조회", "VirusTotal 스캔", "보고서 생성", "알림 설정"])
+
+with tab1:  # 대시보드 탭 (업그레이드: 더 많은 차트 + VT 통합 통계)
     st.header("로그 대시보드")
     if 'df' in st.session_state and len(st.session_state.df) > 0:
         df = st.session_state.df.copy()
         
-        # 시간별 로그 수 차트 (Altair 사용)
+        # 시간별 로그 수 차트 (Altair 사용, 업그레이드: 줌 기능)
         if '@timestamp' in df.columns:
             df['@timestamp'] = pd.to_datetime(df['@timestamp'], errors='coerce')
             df['hour'] = df['@timestamp'].dt.hour
@@ -142,10 +211,10 @@ with tab1: # 대시보드 탭 (Wazuh/Kibana 스타일 시각화 추가)
                 y='count()',
                 color='level',
                 tooltip=['hour', 'count()', 'level']
-            ).properties(title="시간별 로그 분포").interactive()
+            ).properties(title="시간별 로그 분포").interactive(bind_y=True)
             st.altair_chart(time_chart, use_container_width=True)
         
-        # 레벨 분포 Pie Chart (Altair 사용)
+        # 레벨 분포 Pie Chart (업그레이드: VT 점수 기반 필터링 옵션)
         level_counts = df['level'].value_counts().reset_index()
         level_counts.columns = ['level', 'count']
         pie_chart = alt.Chart(level_counts).mark_arc().encode(
@@ -155,7 +224,7 @@ with tab1: # 대시보드 탭 (Wazuh/Kibana 스타일 시각화 추가)
         ).properties(title="로그 레벨 분포").interactive()
         st.altair_chart(pie_chart, use_container_width=True)
         
-        # Top 5 Users/Events (표 형식)
+        # Top 5 Users/Events/VT High Scores (표 형식, 업그레이드)
         if 'winlog.user.name' in df.columns:
             top_users = df['winlog.user.name'].value_counts().head(5).reset_index()
             top_users.columns = ['User', 'Count']
@@ -167,91 +236,156 @@ with tab1: # 대시보드 탭 (Wazuh/Kibana 스타일 시각화 추가)
             top_events.columns = ['Event ID', 'Count']
             st.subheader("Top 5 Events")
             st.table(top_events)
+        
+        if 'vt_score' in df.columns:
+            high_vt = df[df['vt_score'] > vt_threshold].sort_values('vt_score', ascending=False).head(5)
+            st.subheader("Top 5 High VT Scores")
+            st.table(high_vt[['message', 'vt_score']])
 
-with tab2: # 로그 조회 탭
+with tab2:  # 로그 조회 탭 (업그레이드: 트리 뷰 + 페이징 통합)
     st.header("로그 조회")
-    # 1. 로그 연동 (EVTX 업로드 & ES 인덱싱)
+    # 1. 로그 연동 (EVTX 업로드 & ES 인덱싱, 업그레이드: 프로그레스 바 추가)
     evtx_file = st.file_uploader("EVTX 로그 업로드", type="evtx")
     if evtx_file and st.button("ES에 인덱싱"):
         with st.spinner("EVTX 파싱 & 인덱싱 중..."):
             parser = PyEvtxParser(evtx_file)
+            progress_bar = st.progress(0)
+            count = 0
+            total = sum(1 for _ in parser.records_json())  # 총 레코드 수 계산 (재파싱 필요, 최적화 가능)
+            parser = PyEvtxParser(evtx_file)  # 재초기화
             for record in parser.records_json():
                 log_data = json.loads(record['data'])
                 event = xmltodict.parse(log_data['Event'])['Event']
                 es.index(index=".internal.alerts-security.alerts*", body=event)
+                count += 1
+                progress_bar.progress(count / total if total > 0 else 0)
         st.success("인덱싱 완료!")
-    # 2. 모든 로그 가져오기
+
+    # 2. 모든 로그 가져오기 (업그레이드: 시간 범위 통합 쿼리)
     if st.button("모든 로그 가져오기"):
         query = {
-            "query": {"match_all": {}},
-            "size": 10000, # 최대 크기
-            "sort": [{"@timestamp": {"order": "desc"}}] # 최근 순 정렬
+            "query": {
+                "range": {
+                    "@timestamp": {
+                        "gte": time_range[0].isoformat(),
+                        "lte": time_range[1].isoformat()
+                    }
+                }
+            },
+            "size": 10000,
+            "sort": [{"@timestamp": {"order": "desc"}}]
         }
         try:
             res = es.search(index=".internal.alerts-security.alerts*", body=query)
             logs = [hit['_source'] for hit in res['hits']['hits']]
             df = pd.DataFrame(logs)
-           
+            
             # 초기 level 설정
             if 'kibana.alert.severity' in df.columns:
                 df['level'] = df['kibana.alert.severity'].str.lower()
             else:
                 df['level'] = 'low'
-           
+            
             st.session_state.df = df
             st.session_state.filtered_df = df.copy()
-            st.session_state.page_logs = 0 # 페이징 초기화
+            st.session_state.page_logs = 0
             st.success(f"총 {len(df)}개 로그 가져옴")
         except Exception as e:
             st.error(f"ES 쿼리 에러: {e}")
-    # 레벨별 필터링 버튼 (LOW/MEDIUM/HIGH)
+
+    # 레벨별 필터링 버튼 (LOW/MEDIUM/HIGH, 업그레이드: 동적 카운트 표시)
     if 'df' in st.session_state:
-        col1, col2, col3 = st.columns(3)
         level_column = 'new_level' if 'new_level' in st.session_state.df.columns else 'level'
-       
+        level_counts = st.session_state.df[level_column].value_counts()
+        
+        col1, col2, col3 = st.columns(3)
         with col1:
-            if st.button("LOW"):
+            if st.button(f"LOW ({level_counts.get('low', 0)})"):
                 filtered_df = st.session_state.df[st.session_state.df[level_column] == 'low']
                 st.session_state.filtered_df = filtered_df
-                st.session_state.page_logs = 0 # 로그 탭 페이징 초기화
-       
+                st.session_state.page_logs = 0
         with col2:
-            if st.button("MEDIUM"):
+            if st.button(f"MEDIUM ({level_counts.get('medium', 0)})"):
                 filtered_df = st.session_state.df[st.session_state.df[level_column] == 'medium']
                 st.session_state.filtered_df = filtered_df
                 st.session_state.page_logs = 0
-       
         with col3:
-            if st.button("HIGH"):
+            if st.button(f"HIGH ({level_counts.get('high', 0)})"):
                 filtered_df = st.session_state.df[st.session_state.df[level_column] == 'high']
                 st.session_state.filtered_df = filtered_df
                 st.session_state.page_logs = 0
-       
+        
         # 전체 로그 보기 버튼
         if st.button("전체 로그 보기"):
             st.session_state.filtered_df = st.session_state.df.copy()
             st.session_state.page_logs = 0
-    # 필터링 추가 (Event ID 필터 적용)
-    if 'filtered_df' in st.session_state:
-        filtered_df = st.session_state.filtered_df.copy()
-        if event_id_filter and 'winlog.event_id' in filtered_df.columns:
-            filtered_df = filtered_df[filtered_df['winlog.event_id'].astype(str).str.contains(event_id_filter)]
-        display_paginated_df(filtered_df, key_prefix="logs")
 
-with tab4: # 보고서 생성 탭
-    st.header("보고서 & 요약 생성")
-    if 'df' in st.session_state and st.button("LLM 요약 & PDF 생성"):
-        high_score_df = st.session_state.df.copy()  # 전체 로그 요약
-        if len(high_score_df) == 0:
-            st.warning("로그가 없습니다.")
+    # 로그 표시 (트리 뷰 또는 테이블 선택 가능)
+    if 'filtered_df' in st.session_state:
+        view_mode = st.radio("뷰 모드", ["테이블 뷰", "트리 뷰"])
+        filtered_df = st.session_state.filtered_df.copy()
+        if view_mode == "트리 뷰":
+            display_log_tree(filtered_df)
         else:
-            with st.spinner("요약 중..."):
+            display_paginated_df(filtered_df, key_prefix="logs")
+
+with tab3:  # VirusTotal 스캔 탭 (새로 추가: ES 로그에서 해시 추출 및 VT 스캔)
+    st.header("VirusTotal 스캔")
+    if 'df' in st.session_state and st.button("로그에서 해시 추출 & VirusTotal 스캔"):
+        df = st.session_state.df.copy()
+        with st.spinner("VirusTotal 스캔 중... (API 제한으로 지연될 수 있음)"):
+            progress_bar = st.progress(0)
+            for idx, row in df.iterrows():
+                message = row.get('message', '')
+                # 간단한 해시 추출 로직 (예: 64자 hex 문자열 찾기, 실제로는 정규식으로 업그레이드 가능)
+                import re
+                hashes = re.findall(r'\b[a-fA-F0-9]{64}\b', message)  # SHA-256 해시 패턴
+                if hashes:
+                    hash_value = hashes[0]  # 첫 번째 해시 사용
+                    score = get_virustotal_score(hash_value)
+                    df.at[idx, 'vt_score'] = score
+                    # VT 점수에 따라 level 업그레이드
+                    if score > 70:
+                        df.at[idx, 'new_level'] = 'high'
+                    elif score > 30:
+                        df.at[idx, 'new_level'] = 'medium'
+                    else:
+                        df.at[idx, 'new_level'] = 'low'
+                else:
+                    df.at[idx, 'vt_score'] = 0
+                progress_bar.progress((idx + 1) / len(df))
+                time.sleep(0.25)  # API rate limit 방지 (VirusTotal 무료 키는 4/min)
+        
+        st.session_state.df = df
+        st.session_state.filtered_df = df.copy()
+        st.success("VirusTotal 스캔 완료! VT 점수가 추가되었습니다.")
+
+    # 고점수 로그만 필터링
+    if 'df' in st.session_state and 'vt_score' in st.session_state.df.columns:
+        high_vt_df = st.session_state.df[st.session_state.df['vt_score'] > vt_threshold]
+        st.subheader(f"High VT Score Logs (>{vt_threshold})")
+        display_paginated_df(high_vt_df, key_prefix="vt_high")
+
+with tab4:  # 보고서 생성 탭 (업그레이드: VT 통합 + LLM 보고서 생성)
+    st.header("보고서 & 요약 생성")
+    if 'df' in st.session_state and st.button("LLM 요약 & PDF 생성 (VT 고점수 우선)"):
+        # VT 고점수 로그만 필터링하여 LLM 보내기
+        if 'vt_score' not in st.session_state.df.columns:
+            st.warning("먼저 VirusTotal 스캔을 실행하세요.")
+        else:
+            high_score_df = st.session_state.df[st.session_state.df['vt_score'] > vt_threshold].copy()
+            if len(high_score_df) == 0:
+                st.warning("고점수 로그가 없습니다. 전체 로그로 진행합니다.")
+                high_score_df = st.session_state.df.copy()
+            
+            with st.spinner("LLM 요약 & 취약점 분석 중..."):
                 for index, row in high_score_df.iterrows():
                     level = row.get('new_level', row.get('level', 'low'))
                     log_text = row.get('message', str(row))
+                    vt_score = row.get('vt_score', 0)
                     action = '관찰' if level == 'low' else '경고' if level == 'medium' else '격리'
                     vulns_str = row.get('vulns', 'No vulnerabilities found')
-                    prompt = f"이 로그를 간결하게 요약하고, 잠재적 위협, 취약점 분석, 그리고 대응 방안을 제안하세요: {log_text}. 취약점: {vulns_str}. 레벨: {level} - 액션: {action}."
+                    prompt = f"이 로그를 기반으로 취약점 분석 보고서를 작성하세요. 로그: {log_text}. VirusTotal 점수: {vt_score}. 취약점: {vulns_str}. 레벨: {level} - 액션: {action}. 잠재적 위협, 상세 분석, 대응 방안을 포함하세요."
                     response = openai_client.chat.completions.create(
                         model="gpt-4o-mini",
                         messages=[{"role": "user", "content": prompt}]
@@ -259,27 +393,29 @@ with tab4: # 보고서 생성 탭
                     summary = response.choices[0].message.content
                     high_score_df.at[index, 'summary'] = summary
             
+            # 원본 DF 업데이트
             for idx in high_score_df.index:
                 st.session_state.df.at[idx, 'summary'] = high_score_df.at[idx, 'summary']
             
-            st.success("요약 완료!")
+            st.success("요약 및 취약점 분석 완료!")
             st.session_state.filtered_df = high_score_df
             
-            # PDF 생성
+            # PDF 생성 (업그레이드: VT 점수 컬럼 추가, 폰트 경로 수정 필요 시)
             pdf_buffer = io.BytesIO()
-            font_path = './NanumGothic-Bold.ttf' # 업로드한 폰트 사용
+            font_path = './NanumGothic-Bold.ttf'  # 업로드한 폰트 사용 (Streamlit에 업로드 필요)
             pdfmetrics.registerFont(TTFont('NanumGothic', font_path))
             doc = SimpleDocTemplate(pdf_buffer, pagesize=letter)
             styles = getSampleStyleSheet()
             body_style = ParagraphStyle('Body', parent=styles['Normal'], fontName='NanumGothic', fontSize=10, wordWrap='CJK')
-            elements = [Paragraph("로그 분석 보고서", styles['Title'])]
-            data = [['로그 ID', '메시지 (짧게)', '레벨', '요약']]
+            elements = [Paragraph("로그 분석 보고서 (VT 통합)", styles['Title'])]
+            data = [['로그 ID', '메시지 (짧게)', '레벨', 'VT 점수', '요약']]
             for index, row in high_score_df.iterrows():
                 msg_short = Paragraph(row.get('message', 'N/A')[:50] + '...', body_style)
                 level_score = Paragraph(f"{row.get('new_level', row.get('level'))}", body_style)
+                vt_para = Paragraph(str(row.get('vt_score', 0)), body_style)
                 summary_para = Paragraph(row['summary'], body_style)
-                data.append([Paragraph(str(index), body_style), msg_short, level_score, summary_para])
-            col_widths = [50, 150, 100, 300]
+                data.append([Paragraph(str(index), body_style), msg_short, level_score, vt_para, summary_para])
+            col_widths = [50, 150, 100, 50, 250]
             table = Table(data, colWidths=col_widths)
             table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
@@ -297,20 +433,36 @@ with tab4: # 보고서 생성 탭
             elements.append(table)
             doc.build(elements)
             pdf_buffer.seek(0)
-            st.download_button("PDF 다운로드", pdf_buffer, file_name="report.pdf", mime="application/pdf")
+            st.download_button("PDF 다운로드", pdf_buffer, file_name="vt_report.pdf", mime="application/pdf")
 
-    # 추가: CSV 내보내기 (Wazuh 스타일)
+    # 추가: CSV 내보내기 (업그레이드: VT 컬럼 포함)
     if 'df' in st.session_state:
         csv = st.session_state.df.to_csv(index=False).encode('utf-8-sig')
         st.download_button("전체 로그 CSV 다운로드", csv, "logs.csv", "text/csv")
 
-# 최종 표시 로직 (여기서 한 번만 호출, 탭 밖으로 이동)
-if 'filtered_df' in st.session_state:
-    st.subheader("현재 필터링된 로그")
-    display_paginated_df(st.session_state.filtered_df, key_prefix="main")
+with tab5:  # 알림 설정 탭 (새로 추가: 탐지 엔진처럼 알림 기능)
+    st.header("알림 설정")
+    email_alert = st.text_input("알림 이메일 (고위험 시 알림)")
+    slack_webhook = st.text_input("Slack Webhook URL (옵션)")
+    if st.button("알림 테스트"):
+        st.info("테스트 알림 전송: 고위험 로그가 탐지되면 이메일/Slack으로 알림을 보냅니다. (실제 구현은 SMTP/Slack API 필요)")
+    st.warning("알림 기능은 실제 배포 시 SMTP 또는 외부 서비스 연동이 필요합니다. 여기서는 시뮬레이션만.")
 
-# 추가: 로그 통계 차트 (있어보이게, 탭 밖으로 이동)
+# 최종 표시 로직 (탭 밖: 현재 필터링된 로그 요약)
+if 'filtered_df' in st.session_state:
+    st.subheader("현재 필터링된 로그 요약")
+    display_paginated_df(st.session_state.filtered_df, key_prefix="main", page_size=20)  # 작은 페이지로 요약
+
+# 추가: 로그 통계 차트 (업그레이드: VT 포함 바 차트)
 if 'df' in st.session_state and len(st.session_state.df) > 0:
-    with st.expander("로그 통계"):
+    with st.expander("로그 통계 (VT 포함)"):
+        level_column = 'new_level' if 'new_level' in st.session_state.df.columns else 'level'
         level_counts = st.session_state.df[level_column].value_counts()
         st.bar_chart(level_counts)
+        if 'vt_score' in st.session_state.df.columns:
+            vt_hist = alt.Chart(st.session_state.df).mark_bar().encode(
+                x=alt.X('vt_score:Q', bin=True),
+                y='count()',
+                tooltip=['vt_score', 'count()']
+            ).properties(title="VirusTotal 점수 분포")
+            st.altair_chart(vt_hist, use_container_width=True)
