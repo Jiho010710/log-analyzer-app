@@ -87,7 +87,8 @@ def display_paginated_df(df, page_size=50, key_prefix="main"):
     if f'page_{key_prefix}' not in st.session_state:
         st.session_state[f'page_{key_prefix}'] = 0
     if f'sort_col_{key_prefix}' not in st.session_state:
-        st.session_state[f'sort_col_{key_prefix}'] = '@timestamp' if '@timestamp' in df.columns else None
+        default_sort_col = next((col for col in ['@timestamp', 'level', 'new_level', 'winlog.event_id', 'winlog.user.name'] if col in df.columns), None)
+        st.session_state[f'sort_col_{key_prefix}'] = default_sort_col
     if f'sort_asc_{key_prefix}' not in st.session_state:
         st.session_state[f'sort_asc_{key_prefix}'] = False  # 내림차순 기본
 
@@ -111,10 +112,8 @@ def display_paginated_df(df, page_size=50, key_prefix="main"):
 
     # 정렬 컬럼 선택 (드롭다운으로 업그레이드)
     sort_options = [col for col in df.columns if col in ['@timestamp', 'level', 'new_level', 'winlog.event_id', 'winlog.user.name']]
-    sort_col = st.selectbox("정렬 기준", sort_options, index=sort_options.index(st.session_state[f'sort_col_{key_prefix}']) if st.session_state[f'sort_col_{key_prefix}'] in sort_options else 0, key=f'sort_select_{key_prefix}')
-    sort_asc = st.checkbox("오름차순 정렬", value=st.session_state[f'sort_asc_{key_prefix}'], key=f'sort_asc_{key_prefix}')
-    st.session_state[f'sort_col_{key_prefix}'] = sort_col
-    st.session_state[f'sort_asc_{key_prefix}'] = sort_asc
+    sort_col = st.selectbox("정렬 기준", sort_options, key=f'sort_col_{key_prefix}')
+    sort_asc = st.checkbox("오름차순 정렬", key=f'sort_asc_{key_prefix}')
 
     if sort_col:
         df = df.sort_values(by=sort_col, ascending=sort_asc)
