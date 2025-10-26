@@ -105,7 +105,9 @@ def display_paginated_df(df, page_size=50, key_prefix="main"):
     if '@timestamp' in df.columns:
         df['@timestamp'] = pd.to_datetime(df['@timestamp'], errors='coerce')
         start_date, end_date = time_range
-        df = df[(df['@timestamp'] >= pd.to_datetime(start_date)) & (df['@timestamp'] <= pd.to_datetime(end_date))]
+        start_dt = pd.to_datetime(start_date, utc=True)
+        end_dt = pd.to_datetime(end_date, utc=True) + pd.Timedelta(days=1)
+        df = df[(df['@timestamp'] >= start_dt) & (df['@timestamp'] < end_dt)]
 
     # 정렬 컬럼 선택 (드롭다운으로 업그레이드)
     sort_options = [col for col in df.columns if col in ['@timestamp', 'level', 'new_level', 'winlog.event_id', 'winlog.user.name']]
