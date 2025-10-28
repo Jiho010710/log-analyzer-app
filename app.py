@@ -196,8 +196,6 @@ def get_virustotal_score(hash_value):
             return round(score, 2)  # 소수점 2자리로 반올림 (0.00 방지)
         elif response.status_code == 404:
             # 파일이 없으면 업로드 시도 (신규 기능: VT에 업로드 후 분석 대기)
-            upload_url = "https://www.virustotal.com/api/v3/files"
-            # 하지만 파일이 없으므로, 여기서는 가정하고 스킵 (실제 파일 필요 시 추가)
             return 0
         else:
             st.warning(f"VirusTotal API 에러: {response.status_code} - {response.text}")
@@ -273,8 +271,13 @@ with tab1:  # 대시보드 탭 (업그레이드: 더 많은 차트 + VT 통합 �
 
         if 'abuse_score' in df.columns:
             high_abuse = df[df['abuse_score'] > 50].sort_values('abuse_score', ascending=False).head(5)
-            st.subheader("Top 5 High AbuseIPDB Scores")
-            st.table(high_abuse[['winlog.event_data.SourceIp', 'abuse_score']])
+            if not high_abuse.empty:
+                columns = [col for col in ['winlog.event_data.SourceIp', 'abuse_score'] if col in high_abuse.columns]
+                if columns:
+                    st.subheader("Top 5 High AbuseIPDB Scores")
+                    st.table(high_abuse[columns])
+                else:
+                    st.info("No AbuseIPDB data available")
 
 with tab2:  # 로그 조회 탭 (업그레이드: 트리 뷰 + 페이징 통합)
     st.header("로그 조회")
